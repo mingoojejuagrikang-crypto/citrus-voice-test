@@ -426,7 +426,7 @@ const SURVEY_FIELDS = {
   "종경": { type: "float", range: [10, 120], unit: "mm", short: "종",
     aliases: [
       // 실제 오인식 패턴 (최우선)
-      "존경","동경","존경액","존경의",
+      "존경","동경","존경액","존경의","존경이",
       // 기존 + 추가 예상 오인식
       "종겨","종견","종격","종겸","종결","종경이",
       "중경","정경","총경","종교","종견이",
@@ -559,87 +559,139 @@ function matchField(input) {
 }
 
 // ═══════════════════════════════════════
-// 발화 파싱 ("종경 22.5" → {field, value})
+// 한국어 숫자 → 아라비아 숫자 변환
+// Safari iOS는 "1"을 "일", "2"를 "이"로 출력함
 // ═══════════════════════════════════════
-function parseUtterance(transcript) {
-  const t = transcript.trim();
+const KOREAN_DIGITS = {
+  '일':1,'이':2,'삼':3,'사':4,'오':5,
+  '육':6,'칠':7,'팔':8,'구':9,'영':0,'공':0,
+  // Safari 오인식 패턴 ("일" → "길", "기" 등)
+  '길':1,'기':1,'힐':1,
+};
 
-  // 패턴 1: "항목 숫자" (공백 구분)
-  const p1 = t.match(/^(.+?)\s+([\d]+\.?\d*)$/);
-  if (p1) {
-    const m = matchField(p1[1]);
-    return { rawField: p1[1], rawValue: p1[2], field: m.field, value: parseFloat(p1[2]), matchScore: m.score, matchMethod: m.method };
-  }
+function koreanWordToNumber(word) {
+  if (!word) return null;
+  const w = word.trim();
 
-  // 패턴 2: "항목: 숫자" (콜론 구분)
-  const p2 = t.match(/^(.+?)[:\s]+([\d]+\.?\d*)$/);
-  if (p2) {
-    const m = matchField(p2[1]);
-    return { rawField: p2[1], rawValue: p2[2], field: m.field, value: parseFloat(p2[2]), matchScore: m.score, matchMethod: m.method };
-  }
+  // 단일 한국어 숫자
+  if (KOREAN_DIGITS[w] !== undefined) return KOREAN_DIGITS[w];
 
-  // 패턴 3: 한국어 숫자 표현 ("이십이점오" 등)
-  const korNum = t.match(/^(.+?)\s+(.+)$/);
-  if (korNum) {
-    const numVal = koreanToNumber(korNum[2]);
-    if (numVal !== null) {
-      const m = matchField(korNum[1]);
-      return { rawField: korNum[1], rawValue: korNum[2], field: m.field, value: numVal, matchScore: m.score, matchMethod: m.method };
-    }
-  }
+  // 아라비아 숫자
+  if (/^[\d]+\.?\d*$/.test(w)) return parseFloat(w);
 
-  // 패턴 4: 숫자만 말한 경우
-  const numOnly = t.match(/^([\d]+\.?\d*)$/);
-  if (numOnly) {
-    return { rawField: null, rawValue: numOnly[1], field: null, value: parseFloat(numOnly[1]), matchScore: 0, matchMethod: "number-only" };
-  }
-
-  return null;
-}
-
-// 한국어 숫자 변환 (간단 버전)
-function koreanToNumber(str) {
-  const map = { '영':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'칠':7,'팔':8,'구':9,'십':10,'백':100,'점':'.' };
-  // "이십이점오" → 22.5 같은 패턴
-  let cleaned = str.replace(/\s/g, '');
-
-  // 간단 패턴: "XX점X"
+  // 복합 한국어 숫자: "이십이점오"→22.5, "삼십"→30
+  const cleaned = w.replace(/\s/g, '');
   const dotMatch = cleaned.match(/^(.+)점(.+)$/);
   if (dotMatch) {
-    const intPart = parseKoreanInt(dotMatch[1]);
-    const decPart = parseKoreanInt(dotMatch[2]);
-    if (intPart !== null && decPart !== null) {
-      return parseFloat(intPart + '.' + decPart);
-    }
+    const intP = parseKoreanCompound(dotMatch[1]);
+    const decP = parseKoreanCompound(dotMatch[2]);
+    if (intP !== null && decP !== null) return parseFloat(intP + '.' + decP);
   }
-
-  const result = parseKoreanInt(cleaned);
-  return result;
+  return parseKoreanCompound(cleaned);
 }
 
-function parseKoreanInt(str) {
-  const digits = { '영':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'칠':7,'팔':8,'구':9 };
-  // 단순 매핑 (한글 한 자릿수)
-  if (digits[str] !== undefined) return digits[str];
+function parseKoreanCompound(str) {
+  const d = {'영':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'칠':7,'팔':8,'구':9};
+  if (d[str] !== undefined) return d[str];
 
-  // 복합 (십, 백)
-  let result = 0;
-  let current = 0;
+  let result = 0, current = 0;
   for (const ch of str) {
-    if (digits[ch] !== undefined) {
-      current = digits[ch];
-    } else if (ch === '십') {
-      result += (current || 1) * 10;
-      current = 0;
-    } else if (ch === '백') {
-      result += (current || 1) * 100;
-      current = 0;
-    } else {
-      return null;
-    }
+    if (d[ch] !== undefined) { current = d[ch]; }
+    else if (ch === '십') { result += (current || 1) * 10; current = 0; }
+    else if (ch === '백') { result += (current || 1) * 100; current = 0; }
+    else return null;
   }
   result += current;
   return result > 0 ? result : null;
+}
+
+// ═══════════════════════════════════════
+// 발화 파싱 ("종경 22.5" 또는 "나무 일" → {field, value})
+// 여러 전략을 시도하고 최선의 결과를 반환
+// ═══════════════════════════════════════
+function parseUtterance(transcript) {
+  const t = transcript.trim();
+  if (!t) return null;
+
+  const candidates = [];
+
+  // ── 전략 1: "항목 아라비아숫자" (가장 흔한 패턴) ──
+  const p1 = t.match(/^(.+?)\s+([\d]+\.?\d*)$/);
+  if (p1) {
+    const m = matchField(p1[1]);
+    candidates.push({ rawField: p1[1], rawValue: p1[2], field: m.field,
+      value: parseFloat(p1[2]), matchScore: m.score, matchMethod: m.method });
+  }
+
+  // ── 전략 2: "항목 한국어숫자" (Safari가 숫자를 한글로 변환) ──
+  // "나무 일" → 조사나무 1, "과실 삼" → 조사과실 3
+  const words = t.split(/\s+/);
+  if (words.length >= 2) {
+    const lastWord = words[words.length - 1];
+    const numVal = koreanWordToNumber(lastWord);
+    if (numVal !== null) {
+      const fieldPart = words.slice(0, -1).join(' ');
+      const m = matchField(fieldPart);
+      if (m.score >= 0.5) {
+        candidates.push({ rawField: fieldPart, rawValue: lastWord, field: m.field,
+          value: numVal, matchScore: m.score, matchMethod: m.method });
+      }
+    }
+  }
+
+  // ── 전략 3: 한국어숫자가 항목에 붙어있는 경우 ──
+  // "과실이" → 과실 + 이(2), "나무일" → 나무 + 일(1)
+  for (const [kor, num] of Object.entries(KOREAN_DIGITS)) {
+    if (t.endsWith(kor) && t.length > kor.length) {
+      const fieldPart = t.slice(0, -kor.length).trim();
+      if (fieldPart.length > 0) {
+        const m = matchField(fieldPart);
+        if (m.score >= 0.5) {
+          candidates.push({ rawField: fieldPart, rawValue: kor, field: m.field,
+            value: num, matchScore: m.score + 0.001, matchMethod: m.method });
+        }
+      }
+    }
+  }
+
+  // ── 전략 4: 여러 단어에서 마지막 2단어가 숫자일 수 있음 ──
+  // "조사 나무 일" → 조사나무 + 일(1)
+  if (words.length >= 3) {
+    const lastWord = words[words.length - 1];
+    const numVal = koreanWordToNumber(lastWord);
+    if (numVal !== null) {
+      // 앞의 2단어를 합쳐서 항목으로 시도
+      for (let splitAt = words.length - 1; splitAt >= 1; splitAt--) {
+        const fieldPart = words.slice(0, splitAt).join(' ');
+        const m = matchField(fieldPart);
+        if (m.score >= 0.6) {
+          candidates.push({ rawField: fieldPart, rawValue: lastWord, field: m.field,
+            value: numVal, matchScore: m.score, matchMethod: m.method });
+          break;
+        }
+        // 공백 제거 버전도 시도: "조사 나무" → "조사나무"
+        const fieldJoined = words.slice(0, splitAt).join('');
+        const m2 = matchField(fieldJoined);
+        if (m2.score >= 0.6) {
+          candidates.push({ rawField: fieldJoined, rawValue: lastWord, field: m2.field,
+            value: numVal, matchScore: m2.score, matchMethod: m2.method });
+          break;
+        }
+      }
+    }
+  }
+
+  // ── 전략 5: 숫자만 말한 경우 ──
+  const numOnly = koreanWordToNumber(t);
+  if (numOnly !== null) {
+    candidates.push({ rawField: null, rawValue: t, field: null,
+      value: numOnly, matchScore: 0, matchMethod: "number-only" });
+  }
+
+  // 최선의 후보 선택 (항목 매칭 점수 우선)
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.matchScore - a.matchScore);
+  return candidates[0];
 }
 
 // ═══════════════════════════════════════
@@ -657,10 +709,11 @@ function validateValue(field, value) {
 }
 
 // ═══════════════════════════════════════
-// Web Speech API
+// Web Speech API — 연속 인식 모드
 // ═══════════════════════════════════════
 let recognition = null;
 let isListening = false;
+let wantListening = false; // 사용자가 듣기를 원하는 상태
 const results = [];
 
 function initSpeechRecognition() {
@@ -674,58 +727,55 @@ function initSpeechRecognition() {
   recognition.lang = 'ko-KR';
   recognition.interimResults = true;
   recognition.maxAlternatives = 5;
-  recognition.continuous = settings.continuous;
+  recognition.continuous = true; // 항상 연속 모드
 
   // phrases 힌트 시도 (지원 브라우저에서만 동작)
   try {
     if ('SpeechRecognitionPhrase' in window) {
       const phrases = fieldNames.map(f => new SpeechRecognitionPhrase(f, 8.0));
-      // 별칭도 추가
       for (const meta of Object.values(SURVEY_FIELDS)) {
+        if (meta.short) phrases.push(new SpeechRecognitionPhrase(meta.short, 7.0));
         for (const alias of meta.aliases) {
           phrases.push(new SpeechRecognitionPhrase(alias, 6.0));
         }
       }
       recognition.phrases = phrases;
-      console.log('✅ phrases 힌트 등록됨');
     }
-  } catch(e) {
-    console.log('ℹ️ phrases 미지원 → 퍼지매칭으로 보정');
-  }
+  } catch(e) {}
 
   recognition.onstart = () => {
     isListening = true;
-    setStatus('listening', '듣고 있습니다...');
+    setStatus('listening', '🎙️ 듣고 있습니다 — 말씀하세요');
     document.getElementById('micBtn').classList.add('listening');
-    document.getElementById('micLabel').textContent = '듣는 중...';
+    document.getElementById('micLabel').textContent = '탭하면 중지';
   };
 
   recognition.onresult = (event) => {
-    const last = event.results[event.results.length - 1];
-
-    if (last.isFinal) {
-      // 모든 대체 후보 수집
-      const alternatives = [];
-      for (let i = 0; i < last.length; i++) {
-        alternatives.push({
-          transcript: last[i].transcript,
-          confidence: last[i].confidence
-        });
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i];
+      if (result.isFinal) {
+        // 최종 결과 → 즉시 처리
+        const alternatives = [];
+        for (let j = 0; j < result.length; j++) {
+          alternatives.push({ transcript: result[j].transcript, confidence: result[j].confidence });
+        }
+        processResult(alternatives);
+      } else {
+        // 중간 결과 → 화면에 표시
+        setStatus('listening', `"${result[0].transcript}"...`);
       }
-
-      processResult(alternatives);
-    } else {
-      // 중간 결과 표시
-      setStatus('listening', `"${last[0].transcript}"...`);
     }
   };
 
   recognition.onerror = (event) => {
-    console.error('Speech error:', event.error);
     if (event.error === 'no-speech') {
-      setStatus('ready', '음성이 감지되지 않았습니다');
+      // 음성 없음 → 조용히 재시작
+      setStatus('listening', '🎙️ 듣고 있습니다...');
     } else if (event.error === 'not-allowed') {
+      wantListening = false;
       setStatus('error', '마이크 권한을 허용해주세요');
+    } else if (event.error === 'aborted') {
+      // 무시 (재시작 시 발생)
     } else {
       setStatus('error', `오류: ${event.error}`);
     }
@@ -733,16 +783,17 @@ function initSpeechRecognition() {
 
   recognition.onend = () => {
     isListening = false;
-    document.getElementById('micBtn').classList.remove('listening');
-
-    if (settings.continuous && isListening) {
-      // 연속 모드에서 자동 재시작
-      try { recognition.start(); } catch(e) {}
+    // 사용자가 듣기를 원하면 자동 재시작
+    if (wantListening) {
+      setTimeout(() => {
+        try { recognition.start(); } catch(e) {
+          setTimeout(() => { try { recognition.start(); } catch(e2) {} }, 300);
+        }
+      }, 100);
     } else {
+      document.getElementById('micBtn').classList.remove('listening');
       document.getElementById('micLabel').textContent = '탭하여 시작';
-      if (document.getElementById('statusDot').classList.contains('listening')) {
-        setStatus('ready', '준비');
-      }
+      setStatus('ready', '준비');
     }
   };
 
@@ -753,18 +804,20 @@ function initSpeechRecognition() {
 function toggleListening() {
   if (!recognition && !initSpeechRecognition()) return;
 
-  if (isListening) {
-    recognition.stop();
+  if (wantListening) {
+    // 중지
+    wantListening = false;
+    try { recognition.stop(); } catch(e) {}
     isListening = false;
+    document.getElementById('micBtn').classList.remove('listening');
+    document.getElementById('micLabel').textContent = '탭하여 시작';
     setStatus('ready', '준비');
   } else {
-    recognition.continuous = settings.continuous;
-    try {
-      recognition.start();
-    } catch(e) {
-      // 이미 시작된 경우
-      recognition.stop();
-      setTimeout(() => { try { recognition.start(); } catch(e2) {} }, 200);
+    // 시작 — 연속 듣기 모드
+    wantListening = true;
+    try { recognition.start(); } catch(e) {
+      try { recognition.stop(); } catch(e2) {}
+      setTimeout(() => { try { recognition.start(); } catch(e3) {} }, 300);
     }
   }
 }
@@ -837,7 +890,12 @@ function processResult(alternatives) {
   results.push(entry);
   addResultCard(entry);
 
-  // TTS 피드백
+  // 즉시 피드백: 진동 (TTS보다 빠름)
+  if (bestParsed.field) {
+    try { navigator.vibrate(status === 'success' ? [50] : [50,50,50]); } catch(e) {}
+  }
+
+  // TTS 피드백 (짧게)
   if (settings.tts && bestParsed.field) {
     speak(`${bestParsed.field}, ${bestParsed.value}`);
   }
