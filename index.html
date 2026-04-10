@@ -398,22 +398,85 @@
 // 감귤 조사 항목 정의
 // ═══════════════════════════════════════
 const SURVEY_FIELDS = {
-  // 비대조사
-  "횡경": { type: "float", range: [10, 120], unit: "mm", aliases: ["황경","횡겨","횡견","행경","회경","훵경","횡격"] },
-  "종경": { type: "float", range: [10, 120], unit: "mm", aliases: ["종겨","종견","종격","종겸","종견","존경","종결"] },
+  // ── 세션 컨텍스트 항목 ──
+  "조사나무": { type: "int", range: [1, 100], unit: "번", short: "나무",
+    aliases: ["나무","나무번호","조사 나무","조사나무번호",
+      // 실제 오인식 패턴 (테스트 데이터 기반)
+      "노사 나무","노사나무","노다 나무","노다나무","조사나 무비","조사나무비",
+      // 예상 오인식
+      "좌사나무","조산나무","조사나뭐","조사 나뭐","나무가","나무는","나뭐"] },
+  "조사과실": { type: "int", range: [1, 50], unit: "번", short: "과실",
+    aliases: ["과실","과실번호","조사 과실","조사과실번호",
+      // 실제 오인식 패턴
+      "조 과실이","조과실이","사과 실","사과실","오타 과실이","오타과실이",
+      "교사 과실","교사과실","교사 과실 삼",
+      // 예상 오인식
+      "좌사과실","조산과실","조사괴실","과실이","과실은","괴실"] },
 
-  // 품질조사
-  "과중": { type: "float", range: [30, 500], unit: "g", aliases: ["과종","과증","과준","괴중","가중"] },
-  "당도": { type: "float", range: [5, 20], unit: "Brix", aliases: ["당두","당돋","단도","당동","당독"] },
-  "산도": { type: "float", range: [0.3, 3.0], unit: "%", aliases: ["산돋","산동","삼도","선도"] },
-  "착색": { type: "int", range: [1, 10], unit: "", aliases: ["착생","착섹","착쌕","착색이","착색비","칙색"] },
-  "경도": { type: "float", range: [0.1, 30], unit: "N", aliases: ["경돋","견도","겸도","경독"] },
-  "과피두께": { type: "float", range: [0.5, 10], unit: "mm", aliases: ["과피","과피두게","과피두깨","과피 두께","꽈피두께"] },
-  "비타민C": { type: "float", range: [10, 100], unit: "mg", aliases: ["비타민씨","비타민시","비타민 씨","비타민 시","비타민c"] },
-  "구연산": { type: "float", range: [0.1, 3.0], unit: "%", aliases: ["구연삼","구년산","구연산이","귀연산"] },
-  "과즙량": { type: "float", range: [10, 200], unit: "mL", aliases: ["과즙량이","과즙","과증량","과즙냥","과즙난"] },
-  "씨수": { type: "int", range: [0, 30], unit: "개", aliases: ["씨수가","시수","씨 수","씨숫","씨쑤"] },
-  "비고": { type: "text", range: null, unit: "", aliases: ["비고란","메모","참고"] },
+  // ── 비대조사 ──
+  "횡경": { type: "float", range: [10, 120], unit: "mm", short: "횡",
+    aliases: [
+      // 실제 오인식 패턴 (테스트 데이터 기반 — 최우선)
+      "변경","생경",
+      // 기존 + 추가 예상 오인식
+      "황경","횡겨","횡견","행경","회경","훵경","횡격","횡겸",
+      "형경","혈경","흉경","획경","횟경","횡갱","횡경이",
+      // 발음 유사
+      "왱경","훼경","휑경"] },
+  "종경": { type: "float", range: [10, 120], unit: "mm", short: "종",
+    aliases: [
+      // 실제 오인식 패턴 (최우선)
+      "존경","동경","존경액","존경의",
+      // 기존 + 추가 예상 오인식
+      "종겨","종견","종격","종겸","종결","종경이",
+      "중경","정경","총경","종교","종견이",
+      // 발음 유사
+      "종겡","종껑","좀경"] },
+
+  // ── 품질조사 ──
+  "과중": { type: "float", range: [30, 500], unit: "g", short: null,
+    aliases: [
+      "과종","과증","과준","괴중","가중","과충","과증이",
+      "과중이","과즁","괘중","과쥬","과중은"] },
+  "당도": { type: "float", range: [5, 20], unit: "Brix", short: null,
+    aliases: [
+      "당두","당돋","단도","당동","당독","당도가","당도는",
+      "당또","당토","딩도","담도","땅도","당드"] },
+  "산도": { type: "float", range: [0.3, 3.0], unit: "%", short: null,
+    aliases: [
+      "산돋","산동","삼도","선도","산도가","산도는",
+      "산또","산토","잔도","상도","산독"] },
+  "착색": { type: "int", range: [1, 10], unit: "", short: null,
+    aliases: [
+      "착생","착섹","착쌕","착색이","착색비","칙색","착색은",
+      "착쌔","탁색","착샥","착색도","착색가"] },
+  "경도": { type: "float", range: [0.1, 30], unit: "N", short: null,
+    aliases: [
+      "경돋","견도","겸도","경독","경도가","경도는",
+      "경또","껑도","견또","격도","겅도"] },
+  "과피두께": { type: "float", range: [0.5, 10], unit: "mm", short: "과피",
+    aliases: [
+      "과피","과피두게","과피두깨","과피 두께","꽈피두께",
+      "과피두게이","과피 두게","과피두꼐","과피두깨이","과피가"] },
+  "비타민C": { type: "float", range: [10, 100], unit: "mg", short: "비타민",
+    aliases: [
+      "비타민씨","비타민시","비타민 씨","비타민 시","비타민c",
+      "비타민","비타민씨가","비타민 c","비타민쎄","비타민세",
+      "비타민이","비타민 이","피타민씨","피타민"] },
+  "구연산": { type: "float", range: [0.1, 3.0], unit: "%", short: null,
+    aliases: [
+      "구연삼","구년산","구연산이","귀연산",
+      "구연잔","구련산","규연산","구연상","구연산은","구연 산"] },
+  "과즙량": { type: "float", range: [10, 200], unit: "mL", short: "과즙",
+    aliases: [
+      "과즙량이","과즙","과증량","과즙냥","과즙난",
+      "과즙양","과즙 양","과즙량은","과짭량","과즙낭"] },
+  "씨수": { type: "int", range: [0, 30], unit: "개", short: null,
+    aliases: [
+      "씨수가","시수","씨 수","씨숫","씨쑤",
+      "씨수는","씻수","씌수","시쑤","씨수이"] },
+  "비고": { type: "text", range: null, unit: "", short: null,
+    aliases: ["비고란","메모","참고","메모란","비고는","노트","기타"] },
 };
 
 // 전체 항목명 목록
@@ -464,6 +527,11 @@ function matchField(input) {
     // 정확 매칭
     if (cleaned === field.toLowerCase()) return { field, score: 1.0, method: "exact" };
 
+    // 약칭 매칭 ("나무"→"조사나무", "과실"→"조사과실", "과피"→"과피두께" 등)
+    if (meta.short && cleaned === meta.short.toLowerCase()) {
+      return { field, score: 0.99, method: "short" };
+    }
+
     // 별칭 매칭
     for (const alias of meta.aliases) {
       if (cleaned === alias.toLowerCase()) return { field, score: 0.98, method: "alias" };
@@ -472,6 +540,12 @@ function matchField(input) {
     // 퍼지 매칭 (항목명)
     const s1 = similarity(cleaned, field.toLowerCase());
     if (s1 > bestScore) { bestScore = s1; bestMatch = { field, score: s1, method: "fuzzy" }; }
+
+    // 퍼지 매칭 (약칭)
+    if (meta.short) {
+      const ss = similarity(cleaned, meta.short.toLowerCase());
+      if (ss > bestScore) { bestScore = ss; bestMatch = { field, score: ss, method: "fuzzy-short" }; }
+    }
 
     // 퍼지 매칭 (별칭)
     for (const alias of meta.aliases) {
