@@ -3,1057 +3,553 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<!-- 주의: apple-mobile-web-app-capable 제거됨 - standalone PWA에서 SpeechRecognition 작동 안 함 -->
-<title>감귤조사 음성테스트</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<title>감귤조사 v4 — Whisper</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;600;700;900&display=swap');
-
-  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-
-  :root {
-    --bg: #0a0f1a;
-    --surface: #111827;
-    --surface2: #1a2235;
-    --border: #2a3450;
-    --orange: #ff8c21;
-    --orange-dim: #cc6600;
-    --green: #22c55e;
-    --red: #ef4444;
-    --blue: #3b82f6;
-    --text: #f1f5f9;
-    --text-dim: #8892a8;
-    --text-muted: #4b5568;
-  }
-
-  body {
-    font-family: 'Noto Sans KR', -apple-system, 'Apple SD Gothic Neo', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100dvh;
-    overflow-x: hidden;
-  }
-
-  .app {
-    max-width: 480px;
-    margin: 0 auto;
-    padding: 16px;
-    min-height: 100dvh;
-    display: flex;
-    flex-direction: column;
-  }
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  :root{--bg:#0a0f1a;--sf:#111827;--sf2:#1a2235;--bd:#2a3450;--or:#ff8c21;--gn:#22c55e;--rd:#ef4444;--bl:#3b82f6;--tx:#f1f5f9;--txd:#8892a8;--txm:#4b5568}
+  body{font-family:'Noto Sans KR',-apple-system,'Apple SD Gothic Neo',sans-serif;background:var(--bg);color:var(--tx);min-height:100dvh;overflow-x:hidden}
+  .app{max-width:480px;margin:0 auto;padding:12px;min-height:100dvh;display:flex;flex-direction:column}
 
   /* Header */
-  .header {
-    text-align: center;
-    padding: 12px 0 8px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 12px;
-  }
-  .header h1 {
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--orange);
-    letter-spacing: -0.5px;
-  }
-  .header .sub {
-    font-size: 11px;
-    color: var(--text-dim);
-    margin-top: 2px;
-  }
+  .hdr{text-align:center;padding:8px 0;border-bottom:1px solid var(--bd);margin-bottom:8px}
+  .hdr h1{font-size:17px;font-weight:700;color:var(--or)}
+  .hdr .ver{font-size:10px;color:var(--txm)}
 
-  /* Status bar */
-  .status-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    background: var(--surface);
-    border-radius: 10px;
-    margin-bottom: 12px;
-    font-size: 12px;
-  }
-  .status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--text-muted);
-    flex-shrink: 0;
-    transition: background 0.3s;
-  }
-  .status-dot.ready { background: var(--green); }
-  .status-dot.listening { background: var(--orange); animation: pulse 1s infinite; }
-  .status-dot.error { background: var(--red); }
-  .status-text { color: var(--text-dim); flex: 1; }
+  /* Model loading */
+  .model-status{padding:10px 14px;background:var(--sf);border-radius:10px;margin-bottom:8px;font-size:12px;color:var(--txd)}
+  .model-status.loading{border:1px solid var(--or)}
+  .model-status.ready{border:1px solid var(--gn)}
+  .model-status.error{border:1px solid var(--rd)}
+  .prog-bar{height:4px;background:var(--sf2);border-radius:2px;margin-top:6px;overflow:hidden}
+  .prog-fill{height:100%;background:var(--or);border-radius:2px;transition:width .3s;width:0%}
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(1.3); }
-  }
+  /* Status */
+  .status{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--sf);border-radius:8px;margin-bottom:8px;font-size:12px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--txm);flex-shrink:0}
+  .dot.listen{background:var(--or);animation:pulse 1s infinite}
+  .dot.proc{background:var(--bl);animation:pulse .5s infinite}
+  .dot.ok{background:var(--gn)}
+  .dot.err{background:var(--rd)}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(1.4)}}
 
-  /* Recognized result display */
-  .result-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    overflow-y: auto;
-    padding-bottom: 12px;
-    -webkit-overflow-scrolling: touch;
-  }
+  /* Level meter */
+  .meter{height:6px;background:var(--sf2);border-radius:3px;margin-bottom:8px;overflow:hidden}
+  .meter-fill{height:100%;background:var(--gn);border-radius:3px;transition:width 50ms;width:0%}
 
-  .result-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px 16px;
-    animation: slideUp 0.3s ease-out;
-  }
-  .result-card.success { border-left: 3px solid var(--green); }
-  .result-card.warning { border-left: 3px solid var(--orange); }
-  .result-card.fail { border-left: 3px solid var(--red); }
-  .result-card.new-field { border-left: 3px solid var(--blue); }
+  /* Results */
+  .results{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-bottom:60px;-webkit-overflow-scrolling:touch}
+  .card{background:var(--sf);border-radius:10px;padding:12px 14px;animation:fadeIn .25s ease-out}
+  .card.ok{border-left:3px solid var(--gn)}
+  .card.warn{border-left:3px solid var(--or)}
+  .card.fail{border-left:3px solid var(--rd)}
+  .card.new{border-left:3px solid var(--bl)}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  .card-raw{font-size:10px;color:var(--txm);margin-bottom:4px}
+  .card-parsed{display:flex;align-items:baseline;gap:8px}
+  .card-field{font-size:14px;font-weight:700;color:var(--or)}
+  .card-value{font-size:26px;font-weight:900;letter-spacing:-1px}
+  .card-meta{font-size:10px;color:var(--txm);margin-top:4px}
 
-  @keyframes slideUp {
-    from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
+  /* Empty */
+  .empty{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--txm);font-size:13px;line-height:1.8;padding:20px}
 
-  .result-raw {
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-bottom: 6px;
-    word-break: break-all;
-  }
-  .result-parsed {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-  }
-  .result-field {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--orange);
-    min-width: 60px;
-  }
-  .result-value {
-    font-size: 28px;
-    font-weight: 900;
-    color: var(--text);
-    letter-spacing: -1px;
-  }
-  .result-meta {
-    display: flex;
-    gap: 8px;
-    margin-top: 6px;
-    font-size: 10px;
-    color: var(--text-muted);
-  }
-  .result-meta .tag {
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: var(--surface2);
-  }
-  .result-meta .match-score { color: var(--green); }
-  .result-meta .new-tag { color: var(--blue); }
+  /* Controls */
+  .controls{position:fixed;bottom:0;left:0;right:0;background:var(--bg);border-top:1px solid var(--bd);padding:10px;display:flex;justify-content:center;gap:10px;max-width:480px;margin:0 auto}
+  .btn{padding:12px 20px;border:1px solid var(--bd);border-radius:10px;background:var(--sf);color:var(--txd);font-size:13px;font-family:inherit;font-weight:700;cursor:pointer}
+  .btn:active{background:var(--sf2)}
+  .btn.primary{background:var(--or);color:#000;border-color:var(--or)}
+  .btn.primary:active{background:var(--or);opacity:.8}
+  .btn.stop{background:var(--rd);color:#fff;border-color:var(--rd)}
+  .btn.disabled{opacity:.3;pointer-events:none}
 
-  /* Alternatives debug */
-  .alt-list {
-    margin-top: 6px;
-    padding-top: 6px;
-    border-top: 1px solid var(--border);
-    font-size: 10px;
-    color: var(--text-muted);
-  }
-  .alt-list span { display: block; margin-top: 2px; }
-  .alt-list .best { color: var(--green); }
-
-  /* Empty state */
-  .empty-state {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    text-align: center;
-    gap: 8px;
-    padding: 40px 20px;
-  }
-  .empty-state .icon { font-size: 48px; opacity: 0.3; }
-  .empty-state .msg { font-size: 14px; line-height: 1.6; }
-
-  /* Mic button */
-  .mic-area {
-    padding: 12px 0 8px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    border-top: 1px solid var(--border);
-  }
-
-  .mic-btn {
-    width: 72px; height: 72px;
-    border-radius: 50%;
-    border: 3px solid var(--orange-dim);
-    background: var(--surface);
-    color: var(--orange);
-    font-size: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s;
-    position: relative;
-    -webkit-user-select: none;
-    user-select: none;
-  }
-  .mic-btn:active { transform: scale(0.95); }
-  .mic-btn.listening {
-    border-color: var(--orange);
-    background: rgba(255,140,33,0.15);
-    animation: micPulse 1.5s infinite;
-  }
-  @keyframes micPulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255,140,33,0.3); }
-    50% { box-shadow: 0 0 0 16px rgba(255,140,33,0); }
-  }
-
-  .mic-label {
-    font-size: 12px;
-    color: var(--text-dim);
-  }
-
-  /* Controls row */
-  .controls {
-    display: flex;
-    gap: 8px;
-    width: 100%;
-  }
-  .ctrl-btn {
-    flex: 1;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-    color: var(--text-dim);
-    font-size: 12px;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .ctrl-btn:active {
-    background: var(--surface2);
-    color: var(--text);
-  }
-
-  /* Settings panel */
-  .settings {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px;
-    margin-bottom: 12px;
-    display: none;
-  }
-  .settings.open { display: block; }
-  .settings h3 {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--orange);
-    margin-bottom: 10px;
-  }
-  .setting-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 0;
-    font-size: 12px;
-  }
-  .setting-row label { color: var(--text-dim); }
-
-  .toggle {
-    position: relative;
-    width: 40px; height: 22px;
-    background: var(--text-muted);
-    border-radius: 11px;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-  .toggle.on { background: var(--orange); }
-  .toggle::after {
-    content: '';
-    position: absolute;
-    top: 2px; left: 2px;
-    width: 18px; height: 18px;
-    background: white;
-    border-radius: 50%;
-    transition: transform 0.2s;
-  }
-  .toggle.on::after { transform: translateX(18px); }
-
-  /* Registered terms */
-  .terms-list {
-    margin-top: 8px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .term-chip {
-    padding: 3px 8px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 11px;
-    color: var(--text-dim);
-  }
-
-  /* Toast notification */
-  .toast {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) scale(0.9);
-    background: rgba(0,0,0,0.85);
-    color: white;
-    padding: 20px 32px;
-    border-radius: 16px;
-    font-size: 22px;
-    font-weight: 700;
-    z-index: 100;
-    opacity: 0;
-    pointer-events: none;
-    transition: all 0.25s ease-out;
-    text-align: center;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-  }
-  .toast.show {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
-  .toast .toast-field { color: var(--orange); font-size: 16px; }
-  .toast .toast-value { font-size: 32px; margin-top: 4px; }
+  /* Toast */
+  .toast{position:fixed;top:40%;left:50%;transform:translate(-50%,-50%) scale(.9);background:rgba(0,0,0,.9);color:#fff;padding:16px 28px;border-radius:16px;font-size:20px;font-weight:700;z-index:100;opacity:0;pointer-events:none;transition:all .2s;text-align:center;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  .toast.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  .toast .tf{color:var(--or);font-size:14px}
+  .toast .tv{font-size:30px;margin-top:2px}
 </style>
 </head>
 <body>
 <div class="app">
-  <div class="header">
-    <h1>🍊 감귤조사 음성 테스트</h1>
-    <div class="sub">Web Speech API + 퍼지매칭 보정</div>
+  <div class="hdr">
+    <h1>🍊 감귤조사 v4 — Whisper</h1>
+    <div class="ver">Transformers.js 로컬 음성인식 | 네트워크 불필요</div>
   </div>
 
-  <div class="status-bar">
-    <div class="status-dot" id="statusDot"></div>
-    <div class="status-text" id="statusText">대기 중</div>
+  <div class="model-status" id="modelStatus">
+    ⏳ 모델을 로드하세요 (최초 1회 ~75MB 다운로드, 이후 캐시)
+    <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
   </div>
 
-  <div class="settings" id="settingsPanel">
-    <h3>⚙️ 설정</h3>
-    <div class="setting-row">
-      <label>TTS 음성 피드백</label>
-      <div class="toggle on" id="toggleTTS" onclick="toggleSetting('tts')"></div>
-    </div>
-    <div class="setting-row">
-      <label>대체 후보 표시</label>
-      <div class="toggle" id="toggleAlts" onclick="toggleSetting('alts')"></div>
-    </div>
-    <div class="setting-row">
-      <label>연속 인식 모드</label>
-      <div class="toggle" id="toggleCont" onclick="toggleSetting('continuous')"></div>
-    </div>
-    <div style="margin-top:10px">
-      <label style="font-size:12px;color:var(--text-dim)">등록된 항목 (퍼지매칭 대상)</label>
-      <div class="terms-list" id="termsList"></div>
-    </div>
+  <div class="status">
+    <div class="dot" id="dot"></div>
+    <span id="statusText">모델 로드 대기</span>
   </div>
 
-  <div class="result-area" id="resultArea">
-    <div class="empty-state" id="emptyState">
-      <div class="icon">🎤</div>
-      <div class="msg">
-        마이크 버튼을 누르고<br>
-        <strong>"종경 22.5"</strong> 처럼 말해보세요
-      </div>
-    </div>
-  </div>
+  <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
 
-  <div class="mic-area">
-    <button class="mic-btn" id="micBtn" onclick="toggleListening()">🎤</button>
-    <div class="mic-label" id="micLabel">탭하여 시작</div>
-    <div class="controls">
-      <button class="ctrl-btn" onclick="toggleSettings()">⚙️ 설정</button>
-      <button class="ctrl-btn" onclick="clearResults()">🗑️ 초기화</button>
-      <button class="ctrl-btn" onclick="exportLog()">📋 로그복사</button>
+  <div class="results" id="results">
+    <div class="empty" id="empty">
+      아래 "모델 로드" 버튼을 먼저 누르세요<br>
+      로드 완료 후 "시작"을 누르면<br>
+      <strong>손대지 않고 계속 음성 입력</strong>할 수 있습니다
     </div>
   </div>
 </div>
 
-<div class="toast" id="toast">
-  <div class="toast-field" id="toastField"></div>
-  <div class="toast-value" id="toastValue"></div>
+<div class="controls" id="controls">
+  <button class="btn primary" id="btnLoad" onclick="window.loadModel()">📦 모델 로드</button>
+  <button class="btn disabled" id="btnStart" onclick="window.toggleCapture()">🎤 시작</button>
+  <button class="btn" onclick="window.clearResults()">🗑️</button>
+  <button class="btn" onclick="window.exportLog()">📋</button>
 </div>
 
-<script>
-// ═══════════════════════════════════════
-// 감귤 조사 항목 정의
-// ═══════════════════════════════════════
-const SURVEY_FIELDS = {
-  // ── 세션 컨텍스트 항목 ──
-  "조사나무": { type: "int", range: [1, 100], unit: "번", short: "나무",
-    aliases: ["나무","나무번호","조사 나무","조사나무번호",
-      // 실제 오인식 패턴 (테스트 데이터 기반)
-      "노사 나무","노사나무","노다 나무","노다나무","조사나 무비","조사나무비",
-      // 예상 오인식
-      "좌사나무","조산나무","조사나뭐","조사 나뭐","나무가","나무는","나뭐"] },
-  "조사과실": { type: "int", range: [1, 50], unit: "번", short: "과실",
-    aliases: ["과실","과실번호","조사 과실","조사과실번호",
-      // 실제 오인식 패턴
-      "조 과실이","조과실이","사과 실","사과실","오타 과실이","오타과실이",
-      "교사 과실","교사과실","교사 과실 삼",
-      // 예상 오인식
-      "좌사과실","조산과실","조사괴실","과실이","과실은","괴실"] },
+<div class="toast" id="toast"><div class="tf" id="toastF"></div><div class="tv" id="toastV"></div></div>
 
-  // ── 비대조사 ──
-  "횡경": { type: "float", range: [10, 120], unit: "mm", short: "횡",
-    aliases: [
-      // 실제 오인식 패턴 (테스트 데이터 기반 — 최우선)
-      "변경","생경",
-      // 기존 + 추가 예상 오인식
-      "황경","횡겨","횡견","행경","회경","훵경","횡격","횡겸",
-      "형경","혈경","흉경","획경","횟경","횡갱","횡경이",
-      // 발음 유사
-      "왱경","훼경","휑경"] },
-  "종경": { type: "float", range: [10, 120], unit: "mm", short: "종",
-    aliases: [
-      // 실제 오인식 패턴 (최우선)
-      "존경","동경","존경액","존경의","존경이",
-      // 기존 + 추가 예상 오인식
-      "종겨","종견","종격","종겸","종결","종경이",
-      "중경","정경","총경","종교","종견이",
-      // 발음 유사
-      "종겡","종껑","좀경"] },
-
-  // ── 품질조사 ──
-  "과중": { type: "float", range: [30, 500], unit: "g", short: null,
-    aliases: [
-      "과종","과증","과준","괴중","가중","과충","과증이",
-      "과중이","과즁","괘중","과쥬","과중은"] },
-  "당도": { type: "float", range: [5, 20], unit: "Brix", short: null,
-    aliases: [
-      "당두","당돋","단도","당동","당독","당도가","당도는",
-      "당또","당토","딩도","담도","땅도","당드"] },
-  "산도": { type: "float", range: [0.3, 3.0], unit: "%", short: null,
-    aliases: [
-      "산돋","산동","삼도","선도","산도가","산도는",
-      "산또","산토","잔도","상도","산독"] },
-  "착색": { type: "int", range: [1, 10], unit: "", short: null,
-    aliases: [
-      "착생","착섹","착쌕","착색이","착색비","칙색","착색은",
-      "착쌔","탁색","착샥","착색도","착색가"] },
-  "경도": { type: "float", range: [0.1, 30], unit: "N", short: null,
-    aliases: [
-      "경돋","견도","겸도","경독","경도가","경도는",
-      "경또","껑도","견또","격도","겅도"] },
-  "과피두께": { type: "float", range: [0.5, 10], unit: "mm", short: "과피",
-    aliases: [
-      "과피","과피두게","과피두깨","과피 두께","꽈피두께",
-      "과피두게이","과피 두게","과피두꼐","과피두깨이","과피가"] },
-  "비타민C": { type: "float", range: [10, 100], unit: "mg", short: "비타민",
-    aliases: [
-      "비타민씨","비타민시","비타민 씨","비타민 시","비타민c",
-      "비타민","비타민씨가","비타민 c","비타민쎄","비타민세",
-      "비타민이","비타민 이","피타민씨","피타민"] },
-  "구연산": { type: "float", range: [0.1, 3.0], unit: "%", short: null,
-    aliases: [
-      "구연삼","구년산","구연산이","귀연산",
-      "구연잔","구련산","규연산","구연상","구연산은","구연 산"] },
-  "과즙량": { type: "float", range: [10, 200], unit: "mL", short: "과즙",
-    aliases: [
-      "과즙량이","과즙","과증량","과즙냥","과즙난",
-      "과즙양","과즙 양","과즙량은","과짭량","과즙낭"] },
-  "씨수": { type: "int", range: [0, 30], unit: "개", short: null,
-    aliases: [
-      "씨수가","시수","씨 수","씨숫","씨쑤",
-      "씨수는","씻수","씌수","시쑤","씨수이"] },
-  "비고": { type: "text", range: null, unit: "", short: null,
-    aliases: ["비고란","메모","참고","메모란","비고는","노트","기타"] },
+<script type="module">
+// ═══════════════════════════════════════════════════
+// 1. 감귤 조사 항목 정의 + 퍼지매칭
+// ═══════════════════════════════════════════════════
+const FIELDS = {
+  "조사나무":{type:"int",range:[1,100],unit:"번",short:"나무",
+    aliases:["나무","나무번호","조사 나무","노사 나무","노사나무","노다 나무","조선 나무",
+      "조사나 무비","나무가","나무는","나뭐","좌사나무","조산나무","노선 나무","조 바 나무"]},
+  "조사과실":{type:"int",range:[1,50],unit:"번",short:"과실",
+    aliases:["과실","과실번호","조사 과실","조 과실","사과 실","사과실","오타 과실",
+      "교사 과실","과일","거실","좌사과실","조산과실","조사괴실","과실이","조사 과제",
+      "조사가 실","조사 가시","과 일"]},
+  "횡경":{type:"float",range:[10,120],unit:"mm",short:"횡",
+    aliases:["변경","생경","황경","횡겨","횡견","행경","회경","훵경","횡격","횡겸",
+      "형경","혈경","흉경","획경","횟경","횡경이","왱경","휑경","엔"]},
+  "종경":{type:"float",range:[10,120],unit:"mm",short:"종",
+    aliases:["존경","동경","존경액","존경의","존경이","정경",
+      "종겨","종견","종격","종겸","종결","종경이","중경","총경","종교",
+      "송","용"]},
+  "과중":{type:"float",range:[30,500],unit:"g",short:null,
+    aliases:["과종","과증","과준","괴중","가중","과충","과중이"]},
+  "당도":{type:"float",range:[5,20],unit:"Brix",short:null,
+    aliases:["당두","당돋","단도","당동","당독","당또","당토","담도"]},
+  "산도":{type:"float",range:[0.3,3.0],unit:"%",short:null,
+    aliases:["산돋","산동","삼도","선도","산또","잔도","상도"]},
+  "착색":{type:"int",range:[1,10],unit:"",short:null,
+    aliases:["착생","착섹","착쌕","착색이","칙색","탁색"]},
+  "경도":{type:"float",range:[0.1,30],unit:"N",short:null,
+    aliases:["경돋","견도","겸도","경독","껑도","격도"]},
+  "과피두께":{type:"float",range:[0.5,10],unit:"mm",short:"과피",
+    aliases:["과피","과피두게","과피두깨","과피 두께","꽈피두께"]},
+  "비타민C":{type:"float",range:[10,100],unit:"mg",short:"비타민",
+    aliases:["비타민씨","비타민시","비타민 씨","비타민","비타민c","피타민씨"]},
+  "구연산":{type:"float",range:[0.1,3.0],unit:"%",short:null,
+    aliases:["구연삼","구년산","구연산이","귀연산","구련산","규연산"]},
+  "과즙량":{type:"float",range:[10,200],unit:"mL",short:"과즙",
+    aliases:["과즙량이","과즙","과증량","과즙양","과즙 양"]},
+  "씨수":{type:"int",range:[0,30],unit:"개",short:null,
+    aliases:["씨수가","시수","씨 수","씨숫","씨쑤"]},
+  "비고":{type:"text",range:null,unit:"",short:null,
+    aliases:["비고란","메모","참고","노트","기타"]},
 };
 
-// 전체 항목명 목록
-const fieldNames = Object.keys(SURVEY_FIELDS);
-
-// ═══════════════════════════════════════
-// 설정
-// ═══════════════════════════════════════
-const settings = {
-  tts: true,
-  alts: false,
-  continuous: false,
-};
-
-// ═══════════════════════════════════════
-// 레벤슈타인 거리 (퍼지 매칭용)
-// ═══════════════════════════════════════
-function levenshtein(a, b) {
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i-1] === b[j-1]
-        ? dp[i-1][j-1]
-        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
-    }
-  }
-  return dp[m][n];
-}
-
-function similarity(a, b) {
-  const maxLen = Math.max(a.length, b.length);
-  if (maxLen === 0) return 1;
-  return 1 - levenshtein(a, b) / maxLen;
-}
-
-// ═══════════════════════════════════════
-// 항목 퍼지 매칭
-// ═══════════════════════════════════════
-function matchField(input) {
-  const cleaned = input.trim().toLowerCase();
-  let bestMatch = null;
-  let bestScore = 0;
-
-  for (const [field, meta] of Object.entries(SURVEY_FIELDS)) {
-    // 정확 매칭
-    if (cleaned === field.toLowerCase()) return { field, score: 1.0, method: "exact" };
-
-    // 약칭 매칭 ("나무"→"조사나무", "과실"→"조사과실", "과피"→"과피두께" 등)
-    if (meta.short && cleaned === meta.short.toLowerCase()) {
-      return { field, score: 0.99, method: "short" };
-    }
-
-    // 별칭 매칭
-    for (const alias of meta.aliases) {
-      if (cleaned === alias.toLowerCase()) return { field, score: 0.98, method: "alias" };
-    }
-
-    // 퍼지 매칭 (항목명)
-    const s1 = similarity(cleaned, field.toLowerCase());
-    if (s1 > bestScore) { bestScore = s1; bestMatch = { field, score: s1, method: "fuzzy" }; }
-
-    // 퍼지 매칭 (약칭)
-    if (meta.short) {
-      const ss = similarity(cleaned, meta.short.toLowerCase());
-      if (ss > bestScore) { bestScore = ss; bestMatch = { field, score: ss, method: "fuzzy-short" }; }
-    }
-
-    // 퍼지 매칭 (별칭)
-    for (const alias of meta.aliases) {
-      const s2 = similarity(cleaned, alias.toLowerCase());
-      if (s2 > bestScore) { bestScore = s2; bestMatch = { field, score: s2, method: "fuzzy-alias" }; }
-    }
-  }
-
-  if (bestMatch && bestMatch.score >= 0.5) return bestMatch;
-  return { field: input, score: 0, method: "new" };
-}
-
-// ═══════════════════════════════════════
-// 한국어 숫자 → 아라비아 숫자 변환
-// Safari iOS는 "1"을 "일", "2"를 "이"로 출력함
-// ═══════════════════════════════════════
 const KOREAN_DIGITS = {
-  '일':1,'이':2,'삼':3,'사':4,'오':5,
-  '육':6,'칠':7,'팔':8,'구':9,'영':0,'공':0,
-  // Safari 오인식 패턴 ("일" → "길", "기" 등)
-  '길':1,'기':1,'힐':1,
+  '일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'칠':7,'팔':8,'구':9,
+  '영':0,'공':0,'길':1,'기':1,'위':2
 };
 
-function koreanWordToNumber(word) {
-  if (!word) return null;
-  const w = word.trim();
+function levenshtein(a,b){
+  const m=a.length,n=b.length,d=Array.from({length:m+1},()=>Array(n+1).fill(0));
+  for(let i=0;i<=m;i++)d[i][0]=i;for(let j=0;j<=n;j++)d[0][j]=j;
+  for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)
+    d[i][j]=a[i-1]===b[j-1]?d[i-1][j-1]:1+Math.min(d[i-1][j],d[i][j-1],d[i-1][j-1]);
+  return d[m][n];
+}
+function sim(a,b){const m=Math.max(a.length,b.length);return m===0?1:1-levenshtein(a,b)/m}
 
-  // 단일 한국어 숫자
-  if (KOREAN_DIGITS[w] !== undefined) return KOREAN_DIGITS[w];
-
-  // 아라비아 숫자
-  if (/^[\d]+\.?\d*$/.test(w)) return parseFloat(w);
-
-  // 복합 한국어 숫자: "이십이점오"→22.5, "삼십"→30
-  const cleaned = w.replace(/\s/g, '');
-  const dotMatch = cleaned.match(/^(.+)점(.+)$/);
-  if (dotMatch) {
-    const intP = parseKoreanCompound(dotMatch[1]);
-    const decP = parseKoreanCompound(dotMatch[2]);
-    if (intP !== null && decP !== null) return parseFloat(intP + '.' + decP);
+function matchField(input){
+  const c=input.trim().toLowerCase();
+  let best=null,bestS=0;
+  for(const[f,m]of Object.entries(FIELDS)){
+    if(c===f.toLowerCase())return{field:f,score:1,method:"exact"};
+    if(m.short&&c===m.short.toLowerCase())return{field:f,score:.99,method:"short"};
+    for(const a of m.aliases)if(c===a.toLowerCase())return{field:f,score:.98,method:"alias"};
+    const s1=sim(c,f.toLowerCase());if(s1>bestS){bestS=s1;best={field:f,score:s1,method:"fuzzy"}}
+    if(m.short){const ss=sim(c,m.short.toLowerCase());if(ss>bestS){bestS=ss;best={field:f,score:ss,method:"fuzzy-short"}}}
+    for(const a of m.aliases){const s2=sim(c,a.toLowerCase());if(s2>bestS){bestS=s2;best={field:f,score:s2,method:"fuzzy-alias"}}}
   }
-  return parseKoreanCompound(cleaned);
+  return best&&best.score>=.5?best:{field:input,score:0,method:"new"};
 }
 
-function parseKoreanCompound(str) {
-  const d = {'영':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'칠':7,'팔':8,'구':9};
-  if (d[str] !== undefined) return d[str];
-
-  let result = 0, current = 0;
-  for (const ch of str) {
-    if (d[ch] !== undefined) { current = d[ch]; }
-    else if (ch === '십') { result += (current || 1) * 10; current = 0; }
-    else if (ch === '백') { result += (current || 1) * 100; current = 0; }
-    else return null;
-  }
-  result += current;
-  return result > 0 ? result : null;
+function koreanWordToNumber(w){
+  if(!w)return null;const t=w.trim();
+  if(KOREAN_DIGITS[t]!==undefined)return KOREAN_DIGITS[t];
+  if(/^[\d]+\.?\d*$/.test(t))return parseFloat(t);
+  const cl=t.replace(/\s/g,''),dm=cl.match(/^(.+)점(.+)$/);
+  if(dm){const a=kc(dm[1]),b=kc(dm[2]);if(a!==null&&b!==null)return parseFloat(a+'.'+b)}
+  return kc(cl);
+}
+function kc(s){
+  const d={'영':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'칠':7,'팔':8,'구':9};
+  if(d[s]!==undefined)return d[s];let r=0,c=0;
+  for(const ch of s){if(d[ch]!==undefined)c=d[ch];else if(ch==='십'){r+=(c||1)*10;c=0}else if(ch==='백'){r+=(c||1)*100;c=0}else return null}
+  r+=c;return r>0?r:null;
 }
 
-// ═══════════════════════════════════════
-// 발화 파싱 ("종경 22.5" 또는 "나무 일" → {field, value})
-// 여러 전략을 시도하고 최선의 결과를 반환
-// ═══════════════════════════════════════
-function parseUtterance(transcript) {
-  const t = transcript.trim();
-  if (!t) return null;
+// 컨텍스트 상태: 항목만 인식되고 값이 없을 때 보관
+let pendingField = null;
 
-  const candidates = [];
+function parseUtterance(text){
+  const t=text.trim().replace(/[.,!?。、]+$/,''); // 후행 구두점 제거
+  if(!t)return null;
 
-  // ── 전략 1: "항목 아라비아숫자" (가장 흔한 패턴) ──
-  const p1 = t.match(/^(.+?)\s+([\d]+\.?\d*)$/);
-  if (p1) {
-    const m = matchField(p1[1]);
-    candidates.push({ rawField: p1[1], rawValue: p1[2], field: m.field,
-      value: parseFloat(p1[2]), matchScore: m.score, matchMethod: m.method });
+  const candidates=[];
+
+  // 전략1: "항목 아라비아숫자"
+  const p1=t.match(/^(.+?)\s+([\d]+\.?\d*)$/);
+  if(p1){const m=matchField(p1[1]);candidates.push({rawField:p1[1],field:m.field,value:parseFloat(p1[2]),matchScore:m.score,matchMethod:m.method})}
+
+  // 전략2: "항목 한국어숫자"
+  const ws=t.split(/\s+/);
+  if(ws.length>=2){
+    const last=ws[ws.length-1],nv=koreanWordToNumber(last);
+    if(nv!==null){const fp=ws.slice(0,-1).join(' '),m=matchField(fp);
+      if(m.score>=.5)candidates.push({rawField:fp,field:m.field,value:nv,matchScore:m.score,matchMethod:m.method})}
   }
 
-  // ── 전략 2: "항목 한국어숫자" (Safari가 숫자를 한글로 변환) ──
-  // "나무 일" → 조사나무 1, "과실 삼" → 조사과실 3
-  const words = t.split(/\s+/);
-  if (words.length >= 2) {
-    const lastWord = words[words.length - 1];
-    const numVal = koreanWordToNumber(lastWord);
-    if (numVal !== null) {
-      const fieldPart = words.slice(0, -1).join(' ');
-      const m = matchField(fieldPart);
-      if (m.score >= 0.5) {
-        candidates.push({ rawField: fieldPart, rawValue: lastWord, field: m.field,
-          value: numVal, matchScore: m.score, matchMethod: m.method });
+  // 전략3: 한국어숫자가 붙은 경우 "과실이"→과실+2
+  for(const[kor,num]of Object.entries(KOREAN_DIGITS)){
+    if(t.endsWith(kor)&&t.length>kor.length){const fp=t.slice(0,-kor.length).trim();
+      if(fp.length>0){const m=matchField(fp);if(m.score>=.5)candidates.push({rawField:fp,field:m.field,value:num,matchScore:m.score+.001,matchMethod:m.method})}}}
+
+  // 전략4: 3단어 이상 "조사 나무 일"
+  if(ws.length>=3){
+    const last=ws[ws.length-1],nv=koreanWordToNumber(last);
+    if(nv!==null)for(let i=ws.length-1;i>=1;i--){
+      const fp=ws.slice(0,i).join(' '),fj=ws.slice(0,i).join('');
+      let m=matchField(fp);if(m.score>=.6){candidates.push({rawField:fp,field:m.field,value:nv,matchScore:m.score,matchMethod:m.method});break}
+      m=matchField(fj);if(m.score>=.6){candidates.push({rawField:fj,field:m.field,value:nv,matchScore:m.score,matchMethod:m.method});break}
+    }
+  }
+
+  // 전략5: 숫자만 → 이전 pendingField에 할당
+  const numOnly=koreanWordToNumber(t);
+  if(numOnly!==null){
+    if(pendingField){
+      const pf=pendingField;pendingField=null;
+      return{rawField:`[이전:${pf}]`,field:pf,value:numOnly,matchScore:.95,matchMethod:"pending"};
+    }
+    candidates.push({rawField:null,field:null,value:numOnly,matchScore:0,matchMethod:"number-only"});
+  }
+
+  // 전략6: 항목만 (값 없음) → pendingField에 저장
+  if(candidates.length===0){
+    const m=matchField(t);
+    if(m.score>=.6){pendingField=m.field;return{rawField:t,field:m.field,value:null,matchScore:m.score,matchMethod:"pending-set"};}
+    return null;
+  }
+
+  candidates.sort((a,b)=>b.matchScore-a.matchScore);
+  const best=candidates[0];
+  if(best.field)pendingField=null; // 성공하면 pending 초기화
+  return best;
+}
+
+function validateValue(f,v){
+  const m=FIELDS[f];if(!m||!m.range)return{valid:true};
+  const[min,max]=m.range;return v<min||v>max?{valid:false,warning:`범위 초과(${min}~${max})`}:{valid:true};
+}
+
+// ═══════════════════════════════════════════════════
+// 2. Whisper 모델 로드 (Transformers.js)
+// ═══════════════════════════════════════════════════
+let transcriber = null;
+let modelLoaded = false;
+
+window.loadModel = async function(){
+  const btn=document.getElementById('btnLoad');
+  const ms=document.getElementById('modelStatus');
+  const pf=document.getElementById('progFill');
+
+  btn.textContent='⏳ 로딩중...';btn.classList.add('disabled');
+  ms.className='model-status loading';
+  ms.firstChild.textContent='📦 모델 다운로드 중... (최초 ~75MB, 이후 캐시)';
+
+  try{
+    const {pipeline,env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
+    env.allowLocalModels=false;
+
+    transcriber = await pipeline('automatic-speech-recognition','onnx-community/whisper-tiny',{
+      dtype:'q8',
+      device:'wasm',
+      progress_callback:(p)=>{
+        if(p.status==='progress'&&p.total){
+          const pct=Math.round(p.loaded/p.total*100);
+          pf.style.width=pct+'%';
+          ms.firstChild.textContent=`📦 ${p.file||'모델'} ${pct}%`;
+        }
+        if(p.status==='ready'){pf.style.width='100%'}
       }
-    }
-  }
-
-  // ── 전략 3: 한국어숫자가 항목에 붙어있는 경우 ──
-  // "과실이" → 과실 + 이(2), "나무일" → 나무 + 일(1)
-  for (const [kor, num] of Object.entries(KOREAN_DIGITS)) {
-    if (t.endsWith(kor) && t.length > kor.length) {
-      const fieldPart = t.slice(0, -kor.length).trim();
-      if (fieldPart.length > 0) {
-        const m = matchField(fieldPart);
-        if (m.score >= 0.5) {
-          candidates.push({ rawField: fieldPart, rawValue: kor, field: m.field,
-            value: num, matchScore: m.score + 0.001, matchMethod: m.method });
-        }
-      }
-    }
-  }
-
-  // ── 전략 4: 여러 단어에서 마지막 2단어가 숫자일 수 있음 ──
-  // "조사 나무 일" → 조사나무 + 일(1)
-  if (words.length >= 3) {
-    const lastWord = words[words.length - 1];
-    const numVal = koreanWordToNumber(lastWord);
-    if (numVal !== null) {
-      // 앞의 2단어를 합쳐서 항목으로 시도
-      for (let splitAt = words.length - 1; splitAt >= 1; splitAt--) {
-        const fieldPart = words.slice(0, splitAt).join(' ');
-        const m = matchField(fieldPart);
-        if (m.score >= 0.6) {
-          candidates.push({ rawField: fieldPart, rawValue: lastWord, field: m.field,
-            value: numVal, matchScore: m.score, matchMethod: m.method });
-          break;
-        }
-        // 공백 제거 버전도 시도: "조사 나무" → "조사나무"
-        const fieldJoined = words.slice(0, splitAt).join('');
-        const m2 = matchField(fieldJoined);
-        if (m2.score >= 0.6) {
-          candidates.push({ rawField: fieldJoined, rawValue: lastWord, field: m2.field,
-            value: numVal, matchScore: m2.score, matchMethod: m2.method });
-          break;
-        }
-      }
-    }
-  }
-
-  // ── 전략 5: 숫자만 말한 경우 ──
-  const numOnly = koreanWordToNumber(t);
-  if (numOnly !== null) {
-    candidates.push({ rawField: null, rawValue: t, field: null,
-      value: numOnly, matchScore: 0, matchMethod: "number-only" });
-  }
-
-  // 최선의 후보 선택 (항목 매칭 점수 우선)
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => b.matchScore - a.matchScore);
-  return candidates[0];
-}
-
-// ═══════════════════════════════════════
-// 값 검증
-// ═══════════════════════════════════════
-function validateValue(field, value) {
-  const meta = SURVEY_FIELDS[field];
-  if (!meta || !meta.range) return { valid: true, warning: null };
-
-  const [min, max] = meta.range;
-  if (value < min || value > max) {
-    return { valid: false, warning: `범위 초과 (${min}~${max}${meta.unit})` };
-  }
-  return { valid: true, warning: null };
-}
-
-// ═══════════════════════════════════════
-// Web Speech API — 연속 인식 모드
-// ═══════════════════════════════════════
-let recognition = null;
-let isListening = false;
-let wantListening = false; // 사용자가 듣기를 원하는 상태
-const results = [];
-
-function initSpeechRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    setStatus('error', 'Web Speech API 미지원 브라우저');
-    return false;
-  }
-
-  recognition = new SR();
-  recognition.lang = 'ko-KR';
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 5;
-  recognition.continuous = true; // 항상 연속 모드
-
-  // phrases 힌트 시도 (지원 브라우저에서만 동작)
-  try {
-    if ('SpeechRecognitionPhrase' in window) {
-      const phrases = fieldNames.map(f => new SpeechRecognitionPhrase(f, 8.0));
-      for (const meta of Object.values(SURVEY_FIELDS)) {
-        if (meta.short) phrases.push(new SpeechRecognitionPhrase(meta.short, 7.0));
-        for (const alias of meta.aliases) {
-          phrases.push(new SpeechRecognitionPhrase(alias, 6.0));
-        }
-      }
-      recognition.phrases = phrases;
-    }
-  } catch(e) {}
-
-  recognition.onstart = () => {
-    isListening = true;
-    setStatus('listening', '🎙️ 듣고 있습니다 — 말씀하세요');
-    document.getElementById('micBtn').classList.add('listening');
-    document.getElementById('micLabel').textContent = '탭하면 중지';
-  };
-
-  recognition.onresult = (event) => {
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const result = event.results[i];
-      if (result.isFinal) {
-        // 최종 결과 → 즉시 처리
-        const alternatives = [];
-        for (let j = 0; j < result.length; j++) {
-          alternatives.push({ transcript: result[j].transcript, confidence: result[j].confidence });
-        }
-        processResult(alternatives);
-      } else {
-        // 중간 결과 → 화면에 표시
-        setStatus('listening', `"${result[0].transcript}"...`);
-      }
-    }
-  };
-
-  recognition.onerror = (event) => {
-    if (event.error === 'no-speech') {
-      // 음성 없음 → 조용히 재시작
-      setStatus('listening', '🎙️ 듣고 있습니다...');
-    } else if (event.error === 'not-allowed') {
-      wantListening = false;
-      setStatus('error', '마이크 권한을 허용해주세요');
-    } else if (event.error === 'aborted') {
-      // 무시 (재시작 시 발생)
-    } else {
-      setStatus('error', `오류: ${event.error}`);
-    }
-  };
-
-  recognition.onend = () => {
-    isListening = false;
-    // 사용자가 듣기를 원하면 자동 재시작
-    if (wantListening) {
-      setTimeout(() => {
-        try { recognition.start(); } catch(e) {
-          setTimeout(() => { try { recognition.start(); } catch(e2) {} }, 300);
-        }
-      }, 100);
-    } else {
-      document.getElementById('micBtn').classList.remove('listening');
-      document.getElementById('micLabel').textContent = '탭하여 시작';
-      setStatus('ready', '준비');
-    }
-  };
-
-  setStatus('ready', '준비');
-  return true;
-}
-
-function toggleListening() {
-  if (!recognition && !initSpeechRecognition()) return;
-
-  if (wantListening) {
-    // 중지
-    wantListening = false;
-    try { recognition.stop(); } catch(e) {}
-    isListening = false;
-    document.getElementById('micBtn').classList.remove('listening');
-    document.getElementById('micLabel').textContent = '탭하여 시작';
-    setStatus('ready', '준비');
-  } else {
-    // 시작 — 연속 듣기 모드
-    wantListening = true;
-    try { recognition.start(); } catch(e) {
-      try { recognition.stop(); } catch(e2) {}
-      setTimeout(() => { try { recognition.start(); } catch(e3) {} }, 300);
-    }
-  }
-}
-
-// ═══════════════════════════════════════
-// 결과 처리
-// ═══════════════════════════════════════
-function processResult(alternatives) {
-  const primary = alternatives[0].transcript;
-
-  // 모든 대체 후보에 대해 파싱 시도
-  let bestParsed = null;
-  let bestAltIdx = 0;
-
-  for (let i = 0; i < alternatives.length; i++) {
-    const parsed = parseUtterance(alternatives[i].transcript);
-    if (!parsed) continue;
-
-    if (!bestParsed) {
-      bestParsed = parsed;
-      bestAltIdx = i;
-    } else if (parsed.matchScore > bestParsed.matchScore) {
-      bestParsed = parsed;
-      bestAltIdx = i;
-    }
-  }
-
-  if (!bestParsed) {
-    addResultCard({
-      raw: primary,
-      alternatives,
-      field: null,
-      value: null,
-      status: 'fail',
-      message: '파싱 실패 - "항목 숫자" 형태로 말해주세요'
     });
+
+    modelLoaded=true;
+    ms.className='model-status ready';
+    ms.innerHTML='✅ Whisper tiny 로드 완료 — 오프라인 음성인식 준비됨';
+    btn.style.display='none';
+    const bs=document.getElementById('btnStart');
+    bs.classList.remove('disabled');
+    setStatus('ok','모델 준비 완료 — "시작"을 누르세요');
+  }catch(e){
+    ms.className='model-status error';
+    ms.innerHTML='❌ 모델 로드 실패: '+e.message;
+    btn.textContent='📦 재시도';btn.classList.remove('disabled');
+    setStatus('err','모델 로드 실패');
+    console.error(e);
+  }
+};
+
+// ═══════════════════════════════════════════════════
+// 3. 오디오 캡처 + VAD (Voice Activity Detection)
+// ═══════════════════════════════════════════════════
+let audioCtx=null, capturing=false;
+let audioBuffer=[], isVoiceActive=false, silenceFrames=0;
+const VAD_THRESHOLD=0.015; // RMS threshold
+const SILENCE_FRAMES=5;    // ~320ms at 4096/16000
+const MIN_FRAMES=3;        // minimum utterance length ~190ms
+const MAX_FRAMES=80;       // max ~5 seconds
+
+let processingQueue=[];
+let isProcessing=false;
+
+window.toggleCapture = async function(){
+  if(capturing){stopCapture();return}
+  if(!modelLoaded){alert('모델을 먼저 로드하세요');return}
+
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}});
+
+    // Safari iOS: AudioContext를 사용자 제스처 안에서 생성
+    audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
+    // Safari가 16kHz를 지원하지 않을 수 있음
+    const actualRate=audioCtx.sampleRate;
+    console.log('AudioContext sampleRate:',actualRate);
+
+    const source=audioCtx.createMediaStreamSource(stream);
+    const processor=audioCtx.createScriptProcessor(4096,1,1);
+    source.connect(processor);
+    processor.connect(audioCtx.destination);
+
+    capturing=true;
+    audioBuffer=[];isVoiceActive=false;silenceFrames=0;
+    document.getElementById('btnStart').textContent='⏹ 중지';
+    document.getElementById('btnStart').className='btn stop';
+    const emp=document.getElementById('empty');if(emp)emp.style.display='none';
+    setStatus('listen','🎙️ 듣고 있습니다 — 말씀하세요');
+
+    processor.onaudioprocess=(e)=>{
+      const input=e.inputBuffer.getChannelData(0);
+      const samples=new Float32Array(input);
+
+      // Resample if needed (Safari might give 48kHz instead of 16kHz)
+      const resampled=actualRate!==16000?resample(samples,actualRate,16000):samples;
+
+      // RMS level
+      const rms=Math.sqrt(resampled.reduce((s,v)=>s+v*v,0)/resampled.length);
+      updateMeter(rms);
+
+      if(rms>VAD_THRESHOLD){
+        // 음성 감지
+        if(!isVoiceActive){isVoiceActive=true;audioBuffer=[]}
+        silenceFrames=0;
+        audioBuffer.push(new Float32Array(resampled));
+      }else if(isVoiceActive){
+        // 무음 구간
+        audioBuffer.push(new Float32Array(resampled)); // 약간의 무음도 포함
+        silenceFrames++;
+        if(silenceFrames>=SILENCE_FRAMES){
+          // 발화 종료
+          if(audioBuffer.length>=MIN_FRAMES){
+            const clip=concatBuffers(audioBuffer);
+            enqueueClip(clip);
+          }
+          audioBuffer=[];isVoiceActive=false;silenceFrames=0;
+        }
+      }
+
+      // 최대 길이 초과 시 강제 처리
+      if(isVoiceActive&&audioBuffer.length>=MAX_FRAMES){
+        const clip=concatBuffers(audioBuffer);
+        enqueueClip(clip);
+        audioBuffer=[];isVoiceActive=false;silenceFrames=0;
+      }
+    };
+
+    // 스트림/프로세서 참조 저장
+    window._stream=stream;window._processor=processor;window._source=source;
+  }catch(e){
+    setStatus('err','마이크 권한을 허용해주세요');
+    console.error(e);
+  }
+};
+
+function stopCapture(){
+  capturing=false;
+  try{window._processor?.disconnect();window._source?.disconnect();
+    window._stream?.getTracks().forEach(t=>t.stop());audioCtx?.close()}catch(e){}
+  document.getElementById('btnStart').textContent='🎤 시작';
+  document.getElementById('btnStart').className='btn primary';
+  setStatus('ok','중지됨');
+  updateMeter(0);
+}
+
+function resample(data,fromRate,toRate){
+  const ratio=fromRate/toRate;
+  const newLen=Math.round(data.length/ratio);
+  const result=new Float32Array(newLen);
+  for(let i=0;i<newLen;i++){
+    const srcIdx=i*ratio;
+    const lo=Math.floor(srcIdx),hi=Math.min(lo+1,data.length-1);
+    const frac=srcIdx-lo;
+    result[i]=data[lo]*(1-frac)+data[hi]*frac;
+  }
+  return result;
+}
+
+function concatBuffers(bufs){
+  const len=bufs.reduce((s,b)=>s+b.length,0);
+  const out=new Float32Array(len);let off=0;
+  for(const b of bufs){out.set(b,off);off+=b.length}
+  return out;
+}
+
+// ═══════════════════════════════════════════════════
+// 4. 처리 큐 (순차 처리)
+// ═══════════════════════════════════════════════════
+function enqueueClip(audio){
+  processingQueue.push(audio);
+  if(!isProcessing)processNext();
+}
+
+async function processNext(){
+  if(processingQueue.length===0){isProcessing=false;return}
+  isProcessing=true;
+  const clip=processingQueue.shift();
+  setStatus('proc','🔄 인식 중...');
+
+  try{
+    const result=await transcriber(clip,{language:'korean',task:'transcribe'});
+    const text=result.text?.trim();
+    console.log('Whisper:',text);
+    if(text)handleTranscript(text);
+  }catch(e){
+    console.error('Whisper error:',e);
+    addCard({raw:'(인식 오류)',field:null,value:null,status:'fail',message:e.message});
+  }
+
+  if(capturing)setStatus('listen','🎙️ 듣고 있습니다...');
+  processNext(); // 다음 클립 처리
+}
+
+// ═══════════════════════════════════════════════════
+// 5. 결과 처리
+// ═══════════════════════════════════════════════════
+const allResults=[];
+
+function handleTranscript(text){
+  const parsed=parseUtterance(text);
+
+  if(!parsed){
+    addCard({raw:text,field:null,value:null,status:'fail',message:'파싱 실패'});
     return;
   }
 
-  // 값 검증
-  let status = 'success';
-  let message = '';
-  const validation = validateValue(bestParsed.field, bestParsed.value);
-
-  if (bestParsed.matchMethod === 'new') {
-    status = 'new-field';
-    message = `새 항목 "${bestParsed.rawField}" 추가`;
-  } else if (!validation.valid) {
-    status = 'warning';
-    message = validation.warning;
-  } else if (bestParsed.matchScore < 0.8) {
-    status = 'warning';
-    message = `"${bestParsed.rawField}" → "${bestParsed.field}" (유사도 ${Math.round(bestParsed.matchScore*100)}%)`;
+  // pending-set: 항목만 인식, 값 대기
+  if(parsed.matchMethod==='pending-set'){
+    addCard({raw:text,field:parsed.field,value:null,status:'warn',message:'값을 말씀해주세요...'});
+    return;
   }
 
-  const entry = {
-    raw: primary,
-    alternatives,
-    field: bestParsed.field,
-    value: bestParsed.value,
-    rawField: bestParsed.rawField,
-    matchScore: bestParsed.matchScore,
-    matchMethod: bestParsed.matchMethod,
-    status,
-    message,
-    bestAltIdx,
-    timestamp: new Date()
-  };
-
-  results.push(entry);
-  addResultCard(entry);
-
-  // 즉시 피드백: 진동 (TTS보다 빠름)
-  if (bestParsed.field) {
-    try { navigator.vibrate(status === 'success' ? [50] : [50,50,50]); } catch(e) {}
+  let status='ok',message='';
+  if(parsed.field&&parsed.value!==null){
+    const v=validateValue(parsed.field,parsed.value);
+    if(!v.valid){status='warn';message=v.warning}
+    if(parsed.matchScore<.8&&parsed.matchMethod!=='pending'){
+      status='warn';message=`"${parsed.rawField}" → "${parsed.field}" (${Math.round(parsed.matchScore*100)}%)`}
   }
+  if(parsed.matchMethod==='new'){status='new';message='새 항목'}
 
-  // TTS 피드백 (짧게)
-  if (settings.tts && bestParsed.field) {
-    speak(`${bestParsed.field}, ${bestParsed.value}`);
-  }
+  const entry={raw:text,field:parsed.field,value:parsed.value,
+    matchScore:parsed.matchScore,matchMethod:parsed.matchMethod,status,message,ts:new Date()};
+  allResults.push(entry);
+  addCard(entry);
 
-  // 토스트 표시
-  if (bestParsed.field) {
-    showToast(bestParsed.field, bestParsed.value);
+  // TTS + 진동 피드백
+  if(parsed.field&&parsed.value!==null){
+    try{navigator.vibrate(status==='ok'?[50]:[50,50,50])}catch(e){}
+    speak(`${parsed.field}, ${parsed.value}`);
+    showToast(parsed.field,parsed.value);
   }
 }
 
-// ═══════════════════════════════════════
-// UI 업데이트
-// ═══════════════════════════════════════
-function addResultCard(entry) {
-  const empty = document.getElementById('emptyState');
-  if (empty) empty.style.display = 'none';
-
-  const area = document.getElementById('resultArea');
-  const card = document.createElement('div');
-  card.className = `result-card ${entry.status}`;
-
-  let html = `<div class="result-raw">🎙️ "${entry.raw}"</div>`;
-
-  if (entry.field && entry.value !== null) {
-    html += `
-      <div class="result-parsed">
-        <span class="result-field">${entry.field}</span>
-        <span class="result-value">${entry.value}</span>
-      </div>`;
-  }
-
-  if (entry.message) {
-    const msgColor = entry.status === 'success' ? 'var(--green)'
-      : entry.status === 'new-field' ? 'var(--blue)'
-      : entry.status === 'warning' ? 'var(--orange)'
-      : 'var(--red)';
-    html += `<div style="font-size:11px;color:${msgColor};margin-top:4px">${entry.message}</div>`;
-  }
-
-  // 메타 정보
-  const meta = SURVEY_FIELDS[entry.field];
-  if (meta) {
-    html += `<div class="result-meta">
-      <span class="tag">${meta.unit || '-'}</span>
-      <span class="tag match-score">매칭: ${entry.matchMethod} (${Math.round(entry.matchScore*100)}%)</span>
-      ${meta.range ? `<span class="tag">범위: ${meta.range[0]}~${meta.range[1]}</span>` : ''}
-    </div>`;
-  } else if (entry.status === 'new-field') {
-    html += `<div class="result-meta"><span class="tag new-tag">🆕 새 항목</span></div>`;
-  }
-
-  // 대체 후보 표시
-  if (settings.alts && entry.alternatives && entry.alternatives.length > 1) {
-    html += `<div class="alt-list">📋 대체 후보:`;
-    entry.alternatives.forEach((alt, i) => {
-      const cls = i === entry.bestAltIdx ? 'best' : '';
-      html += `<span class="${cls}">${i+1}. "${alt.transcript}" (${Math.round(alt.confidence*100)}%)${i === entry.bestAltIdx ? ' ✓' : ''}</span>`;
-    });
-    html += `</div>`;
-  }
-
-  card.innerHTML = html;
-  area.insertBefore(card, area.firstChild);
+// ═══════════════════════════════════════════════════
+// 6. UI
+// ═══════════════════════════════════════════════════
+function setStatus(type,text){
+  document.getElementById('dot').className='dot '+type;
+  document.getElementById('statusText').textContent=text;
 }
 
-function setStatus(type, text) {
-  const dot = document.getElementById('statusDot');
-  const txt = document.getElementById('statusText');
-  dot.className = 'status-dot ' + type;
-  txt.textContent = text;
+function updateMeter(rms){
+  const pct=Math.min(rms*500,100); // scale up for visibility
+  document.getElementById('meterFill').style.width=pct+'%';
+  document.getElementById('meterFill').style.background=rms>VAD_THRESHOLD?'var(--or)':'var(--gn)';
 }
 
-function showToast(field, value) {
-  const toast = document.getElementById('toast');
-  document.getElementById('toastField').textContent = field;
-  document.getElementById('toastValue').textContent = value;
-  toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 1500);
+function addCard(e){
+  const emp=document.getElementById('empty');if(emp)emp.style.display='none';
+  const area=document.getElementById('results');
+  const div=document.createElement('div');
+  div.className='card '+(e.status||'');
+  let h=`<div class="card-raw">🎙️ "${e.raw}"</div>`;
+  if(e.field&&e.value!==null){
+    h+=`<div class="card-parsed"><span class="card-field">${e.field}</span><span class="card-value">${e.value}</span></div>`;
+  }else if(e.field){
+    h+=`<div class="card-parsed"><span class="card-field">${e.field}</span><span class="card-value" style="font-size:14px;color:var(--txd)">값 대기중...</span></div>`;
+  }
+  if(e.message)h+=`<div class="card-meta">${e.message}</div>`;
+  if(e.matchMethod)h+=`<div class="card-meta" style="color:var(--txm)">${e.matchMethod} ${e.matchScore?Math.round(e.matchScore*100)+'%':''}</div>`;
+  div.innerHTML=h;
+  area.insertBefore(div,area.firstChild);
+  // 최대 50개
+  while(area.children.length>50)area.removeChild(area.lastChild);
 }
 
-// ═══════════════════════════════════════
-// TTS
-// ═══════════════════════════════════════
-function speak(text) {
-  if (!('speechSynthesis' in window)) return;
+function showToast(f,v){
+  const t=document.getElementById('toast');
+  document.getElementById('toastF').textContent=f;
+  document.getElementById('toastV').textContent=v;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),1200);
+}
+
+function speak(text){
+  if(!('speechSynthesis' in window))return;
   window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'ko-KR';
-  u.rate = 1.1;
-  u.pitch = 1.0;
+  const u=new SpeechSynthesisUtterance(text);u.lang='ko-KR';u.rate=1.2;
   window.speechSynthesis.speak(u);
 }
 
-// ═══════════════════════════════════════
-// 설정 / 유틸
-// ═══════════════════════════════════════
-function toggleSettings() {
-  document.getElementById('settingsPanel').classList.toggle('open');
-}
+window.clearResults=function(){
+  allResults.length=0;pendingField=null;
+  document.getElementById('results').innerHTML='<div class="empty" id="empty">결과가 초기화되었습니다</div>';
+};
 
-function toggleSetting(key) {
-  settings[key] = !settings[key];
-  document.getElementById({
-    tts: 'toggleTTS',
-    alts: 'toggleAlts',
-    continuous: 'toggleCont'
-  }[key]).classList.toggle('on');
-}
-
-function clearResults() {
-  results.length = 0;
-  const area = document.getElementById('resultArea');
-  area.innerHTML = `<div class="empty-state" id="emptyState">
-    <div class="icon">🎤</div>
-    <div class="msg">마이크 버튼을 누르고<br><strong>"종경 22.5"</strong> 처럼 말해보세요</div>
-  </div>`;
-}
-
-function exportLog() {
-  if (results.length === 0) { alert('기록이 없습니다'); return; }
-  const lines = results.map(r =>
-    `${r.timestamp?.toLocaleTimeString('ko-KR') || '-'}\t${r.raw}\t→\t${r.field || '?'}\t${r.value ?? '?'}\t(${r.matchMethod}, ${Math.round(r.matchScore*100)}%)`
-  );
-  const text = lines.join('\n');
-
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(text).then(() => alert('클립보드에 복사됨'));
-  } else {
-    // iOS fallback
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    alert('클립보드에 복사됨');
-  }
-}
-
-// 등록 항목 칩 표시
-function renderTerms() {
-  const el = document.getElementById('termsList');
-  el.innerHTML = fieldNames.map(f => `<span class="term-chip">${f}</span>`).join('');
-}
-
-// ═══════════════════════════════════════
-// 초기화
-// ═══════════════════════════════════════
-document.addEventListener('DOMContentLoaded', () => {
-  // standalone PWA 모드 감지 → 경고
-  if (window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
-    setStatus('error', '⚠️ Safari 탭에서 열어주세요 (홈화면 앱 모드에서는 음성인식 불가)');
-    document.getElementById('emptyState').querySelector('.msg').innerHTML =
-      '⚠️ <strong>Safari 탭에서 직접 열어주세요</strong><br>홈 화면 추가 모드에서는<br>음성인식이 작동하지 않습니다.';
-  }
-  renderTerms();
-  initSpeechRecognition();
-});
+window.exportLog=function(){
+  if(!allResults.length){alert('기록 없음');return}
+  const lines=allResults.map(r=>`${r.ts?.toLocaleTimeString('ko-KR')||'-'}\t${r.raw}\t→\t${r.field||'?'}\t${r.value??'?'}\t(${r.matchMethod},${Math.round((r.matchScore||0)*100)}%)`);
+  const text=lines.join('\n');
+  if(navigator.clipboard)navigator.clipboard.writeText(text).then(()=>alert('복사됨'));
+  else{const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);alert('복사됨')}
+};
 </script>
 </body>
 </html>
