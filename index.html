@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<!-- 주의: apple-mobile-web-app-capable 제거됨 - standalone PWA에서 SpeechRecognition 작동 안 함 -->
+<title>감귤조사 음성테스트</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;600;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0a0f1a;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #2a3450;
+    --orange: #ff8c21;
+    --orange-dim: #cc6600;
+    --green: #22c55e;
+    --red: #ef4444;
+    --blue: #3b82f6;
+    --text: #f1f5f9;
+    --text-dim: #8892a8;
+    --text-muted: #4b5568;
+  }
+
+  body {
+    font-family: 'Noto Sans KR', -apple-system, 'Apple SD Gothic Neo', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+
+  .app {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 16px;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header */
+  .header {
+    text-align: center;
+    padding: 12px 0 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+  .header h1 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--orange);
+    letter-spacing: -0.5px;
+  }
+  .header .sub {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  /* Status bar */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    font-size: 12px;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .status-dot.ready { background: var(--green); }
+  .status-dot.listening { background: var(--orange); animation: pulse 1s infinite; }
+  .status-dot.error { background: var(--red); }
+  .status-text { color: var(--text-dim); flex: 1; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.3); }
+  }
+
+  /* Recognized result display */
+  .result-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    padding-bottom: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .result-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    animation: slideUp 0.3s ease-out;
+  }
+  .result-card.success { border-left: 3px solid var(--green); }
+  .result-card.warning { border-left: 3px solid var(--orange); }
+  .result-card.fail { border-left: 3px solid var(--red); }
+  .result-card.new-field { border-left: 3px solid var(--blue); }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .result-raw {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    word-break: break-all;
+  }
+  .result-parsed {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .result-field {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--orange);
+    min-width: 60px;
+  }
+  .result-value {
+    font-size: 28px;
+    font-weight: 900;
+    color: var(--text);
+    letter-spacing: -1px;
+  }
+  .result-meta {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+  .result-meta .tag {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--surface2);
+  }
+  .result-meta .match-score { color: var(--green); }
+  .result-meta .new-tag { color: var(--blue); }
+
+  /* Alternatives debug */
+  .alt-list {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+  .alt-list span { display: block; margin-top: 2px; }
+  .alt-list .best { color: var(--green); }
+
+  /* Empty state */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    text-align: center;
+    gap: 8px;
+    padding: 40px 20px;
+  }
+  .empty-state .icon { font-size: 48px; opacity: 0.3; }
+  .empty-state .msg { font-size: 14px; line-height: 1.6; }
+
+  /* Mic button */
+  .mic-area {
+    padding: 12px 0 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  .mic-btn {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    border: 3px solid var(--orange-dim);
+    background: var(--surface);
+    color: var(--orange);
+    font-size: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .mic-btn:active { transform: scale(0.95); }
+  .mic-btn.listening {
+    border-color: var(--orange);
+    background: rgba(255,140,33,0.15);
+    animation: micPulse 1.5s infinite;
+  }
+  @keyframes micPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,140,33,0.3); }
+    50% { box-shadow: 0 0 0 16px rgba(255,140,33,0); }
+  }
+
+  .mic-label {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  /* Controls row */
+  .controls {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+  }
+  .ctrl-btn {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text-dim);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .ctrl-btn:active {
+    background: var(--surface2);
+    color: var(--text);
+  }
+
+  /* Settings panel */
+  .settings {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .settings.open { display: block; }
+  .settings h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--orange);
+    margin-bottom: 10px;
+  }
+  .setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 12px;
+  }
+  .setting-row label { color: var(--text-dim); }
+
+  .toggle {
+    position: relative;
+    width: 40px; height: 22px;
+    background: var(--text-muted);
+    border-radius: 11px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle.on { background: var(--orange); }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 18px; height: 18px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+  .toggle.on::after { transform: translateX(18px); }
+
+  /* Registered terms */
+  .terms-list {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .term-chip {
+    padding: 3px 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* Toast notification */
+  .toast {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    background: rgba(0,0,0,0.85);
+    color: white;
+    padding: 20px 32px;
+    border-radius: 16px;
+    font-size: 22px;
+    font-weight: 700;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s ease-out;
+    text-align: center;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  .toast .toast-field { color: var(--orange); font-size: 16px; }
+  .toast .toast-value { font-size: 32px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h1>🍊 감귤조사 음성 테스트</h1>
+    <div class="sub">Web Speech API + 퍼지매칭 보정</div>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <div class="status-text" id="statusText">대기 중</div>
+  </div>
+
+  <div class="settings" id="settingsPanel">
+    <h3>⚙️ 설정</h3>
+    <div class="setting-row">
+      <label>TTS 음성 피드백</label>
+      <div class="toggle on" id="toggleTTS" onclick="toggleSetting('tts')"></div>
+    </div>
+    <div class="setting-row">
+      <label>대체 후보 표시</label>
+      <div class="toggle" id="toggleAlts" onclick="toggleSetting('alts')"></div>
+    </div>
+    <div class="setting-row">
+      <label>연속 인식 모드</label>
+      <div class="toggle" id="toggleCont" onclick="toggleSetting('continuous')"></div>
+    </div>
+    <div style="margin-top:10px">
+      <label style="font-size:12px;color:var(--text-dim)">등록된 항목 (퍼지매칭 대상)</label>
+      <div class="terms-list" id="termsList"></div>
+    </div>
+  </div>
+
+  <div class="result-area" id="resultArea">
+    <div class="empty-state" id="emptyState">
+      <div class="icon">🎤</div>
+      <div class="msg">
+        마이크 버튼을 누르고<br>
+        <strong>"종경 22.5"</strong> 처럼 말해보세요
+      </div>
+    </div>
+  </div>
+
+  <div class="mic-area">
+    <button class="mic-btn" id="micBtn" onclick="toggleListening()">🎤</button>
+    <div class="mic-label" id="micLabel">탭하여 시작</div>
+    <div class="controls">
+      <button class="ctrl-btn" onclick="toggleSettings()">⚙️ 설정</button>
+      <button class="ctrl-btn" onclick="clearResults()">🗑️ 초기화</button>
+      <button class="ctrl-btn" onclick="exportLog()">📋 로그복사</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast">
+  <div class="toast-field" id="toastField"></div>
+  <div class="toast-value" id="toastValue"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════
+// 감귤 조사 항목 정의
+// ═══════════════════════════════════════
+const SURVEY_FIELDS = {
+  // 비대조사
+  "횡경": { type: "float", range: [10, 120], unit: "mm", aliases: ["황경","횡겨","횡견","행경","회경","훵경","횡격"] },
+  "종경": { type: "float", range: [10, 120], unit: "mm", aliases: ["종겨","종견","종격","종겸","종견","존경","종결"] },
+
+  // 품질조사
+  "과중": { type: "float", range: [30, 500], unit: "g", aliases: ["과종","과증","과준","괴중","가중"] },
+  "당도": { type: "float", range: [5, 20], unit: "Brix", aliases: ["당두","당돋","단도","당동","당독"] },
+  "산도": { type: "float", range: [0.3, 3.0], unit: "%", aliases: ["산돋","산동","삼도","선도"] },
+  "착색": { type: "int", range: [1, 10], unit: "", aliases: ["착생","착섹","착쌕","착색이","착색비","칙색"] },
+  "경도": { type: "float", range: [0.1, 30], unit: "N", aliases: ["경돋","견도","겸도","경독"] },
+  "과피두께": { type: "float", range: [0.5, 10], unit: "mm", aliases: ["과피","과피두게","과피두깨","과피 두께","꽈피두께"] },
+  "비타민C": { type: "float", range: [10, 100], unit: "mg", aliases: ["비타민씨","비타민시","비타민 씨","비타민 시","비타민c"] },
+  "구연산": { type: "float", range: [0.1, 3.0], unit: "%", aliases: ["구연삼","구년산","구연산이","귀연산"] },
+  "과즙량": { type: "float", range: [10, 200], unit: "mL", aliases: ["과즙량이","과즙","과증량","과즙냥","과즙난"] },
+  "씨수": { type: "int", range: [0, 30], unit: "개", aliases: ["씨수가","시수","씨 수","씨숫","씨쑤"] },
+  "비고": { type: "text", range: null, unit: "", aliases: ["비고란","메모","참고"] },
+};
+
+// 전체 항목명 목록
+const fieldNames = Object.keys(SURVEY_FIELDS);
+
+// ═══════════════════════════════════════
+// 설정
+// ═══════════════════════════════════════
+const settings = {
+  tts: true,
+  alts: false,
+  continuous: false,
+};
+
+// ═══════════════════════════════════════
+// 레벤슈타인 거리 (퍼지 매칭용)
+// ═══════════════════════════════════════
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function similarity(a, b) {
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  return 1 - levenshtein(a, b) / maxLen;
+}
+
+// ═══════════════════════════════════════
+// 항목 퍼지 매칭
+// ═══════════════════════════════════════
+function matchField(input) {
+  const cleaned = input.trim().toLowerCase();
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const [field, meta] of Object.entries(SURVEY_FIELDS)) {
+    // 정확 매칭
+    if (cleaned === field.toLowerCase()) return { field, score: 1.0, method: "exact" };
+
+    // 별칭 매칭
+    for (const alias of meta.aliases) {
+      if (cleaned === alias.toLowerCase()) return { field, score: 0.98, method: "alias" };
+    }
+
+    // 퍼지 매칭 (항목명)
+    const s1 = similarity(cleaned, field.toLowerCase());
+    if (s1 > bestScore) { bestScore = s1; bestMatch = { field, score: s1, method: "fuzzy" }; }
+
+    // 퍼지 매칭 (별칭)
+    for (const alias of meta.aliases) {
+      const s2 = similarity(cleaned, alias.toLowerCase());
+      if (s2 > bestScore) { bestScore = s2; bestMatch = { field, score: s2, method: "fuzzy-alias" }; }
+    }
+  }
+
+  if (bestMatch && bestMatch.score >= 0.5) return bestMatch;
+  return { field: input, score: 0, method: "new" };
+}
+
+// ═══════════════════════════════════════
+// 발화 파싱 ("종경 22.5" → {field, value})
+// ═══════════════════════════════════════
+function parseUtterance(transcript) {
+  const t = transcript.trim();
+
+  // 패턴 1: "항목 숫자" (공백 구분)
+  const p1 = t.match(/^(.+?)\s+([\d]+\.?\d*)$/);
+  if (p1) {
+    const m = matchField(p1[1]);
+    return { rawField: p1[1], rawValue: p1[2], field: m.field, value: parseFloat(p1[2]), matchScore: m.score, matchMethod: m.method };
+  }
+
+  // 패턴 2: "항목: 숫자" (콜론 구분)
+  const p2 = t.match(/^(.+?)[:\s]+([\d]+\.?\d*)$/);
+  if (p2) {
+    const m = matchField(p2[1]);
+    return { rawField: p2[1], rawValue: p2[2], field: m.field, value: parseFloat(p2[2]), matchScore: m.score, matchMethod: m.method };
+  }
+
+  // 패턴 3: 한국어 숫자 표현 ("이십이점오" 등)
+  const korNum = t.match(/^(.+?)\s+(.+)$/);
+  if (korNum) {
+    const numVal = koreanToNumber(korNum[2]);
+    if (numVal !== null) {
+      const m = matchField(korNum[1]);
+      return { rawField: korNum[1], rawValue: korNum[2], field: m.field, value: numVal, matchScore: m.score, matchMethod: m.method };
+    }
+  }
+
+  // 패턴 4: 숫자만 말한 경우
+  const numOnly = t.match(/^([\d]+\.?\d*)$/);
+  if (numOnly) {
+    return { rawField: null, rawValue: numOnly[1], field: null, value: parseFloat(numOnly[1]), matchScore: 0, matchMethod: "number-only" };
+  }
+
+  return null;
+}
+
+// 한국어 숫자 변환 (간단 버전)
+function koreanToNumber(str) {
+  const map = { '영':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'칠':7,'팔':8,'구':9,'십':10,'백':100,'점':'.' };
+  // "이십이점오" → 22.5 같은 패턴
+  let cleaned = str.replace(/\s/g, '');
+
+  // 간단 패턴: "XX점X"
+  const dotMatch = cleaned.match(/^(.+)점(.+)$/);
+  if (dotMatch) {
+    const intPart = parseKoreanInt(dotMatch[1]);
+    const decPart = parseKoreanInt(dotMatch[2]);
+    if (intPart !== null && decPart !== null) {
+      return parseFloat(intPart + '.' + decPart);
+    }
+  }
+
+  const result = parseKoreanInt(cleaned);
+  return result;
+}
+
+function parseKoreanInt(str) {
+  const digits = { '영':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'칠':7,'팔':8,'구':9 };
+  // 단순 매핑 (한글 한 자릿수)
+  if (digits[str] !== undefined) return digits[str];
+
+  // 복합 (십, 백)
+  let result = 0;
+  let current = 0;
+  for (const ch of str) {
+    if (digits[ch] !== undefined) {
+      current = digits[ch];
+    } else if (ch === '십') {
+      result += (current || 1) * 10;
+      current = 0;
+    } else if (ch === '백') {
+      result += (current || 1) * 100;
+      current = 0;
+    } else {
+      return null;
+    }
+  }
+  result += current;
+  return result > 0 ? result : null;
+}
+
+// ═══════════════════════════════════════
+// 값 검증
+// ═══════════════════════════════════════
+function validateValue(field, value) {
+  const meta = SURVEY_FIELDS[field];
+  if (!meta || !meta.range) return { valid: true, warning: null };
+
+  const [min, max] = meta.range;
+  if (value < min || value > max) {
+    return { valid: false, warning: `범위 초과 (${min}~${max}${meta.unit})` };
+  }
+  return { valid: true, warning: null };
+}
+
+// ═══════════════════════════════════════
+// Web Speech API
+// ═══════════════════════════════════════
+let recognition = null;
+let isListening = false;
+const results = [];
+
+function initSpeechRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    setStatus('error', 'Web Speech API 미지원 브라우저');
+    return false;
+  }
+
+  recognition = new SR();
+  recognition.lang = 'ko-KR';
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 5;
+  recognition.continuous = settings.continuous;
+
+  // phrases 힌트 시도 (지원 브라우저에서만 동작)
+  try {
+    if ('SpeechRecognitionPhrase' in window) {
+      const phrases = fieldNames.map(f => new SpeechRecognitionPhrase(f, 8.0));
+      // 별칭도 추가
+      for (const meta of Object.values(SURVEY_FIELDS)) {
+        for (const alias of meta.aliases) {
+          phrases.push(new SpeechRecognitionPhrase(alias, 6.0));
+        }
+      }
+      recognition.phrases = phrases;
+      console.log('✅ phrases 힌트 등록됨');
+    }
+  } catch(e) {
+    console.log('ℹ️ phrases 미지원 → 퍼지매칭으로 보정');
+  }
+
+  recognition.onstart = () => {
+    isListening = true;
+    setStatus('listening', '듣고 있습니다...');
+    document.getElementById('micBtn').classList.add('listening');
+    document.getElementById('micLabel').textContent = '듣는 중...';
+  };
+
+  recognition.onresult = (event) => {
+    const last = event.results[event.results.length - 1];
+
+    if (last.isFinal) {
+      // 모든 대체 후보 수집
+      const alternatives = [];
+      for (let i = 0; i < last.length; i++) {
+        alternatives.push({
+          transcript: last[i].transcript,
+          confidence: last[i].confidence
+        });
+      }
+
+      processResult(alternatives);
+    } else {
+      // 중간 결과 표시
+      setStatus('listening', `"${last[0].transcript}"...`);
+    }
+  };
+
+  recognition.onerror = (event) => {
+    console.error('Speech error:', event.error);
+    if (event.error === 'no-speech') {
+      setStatus('ready', '음성이 감지되지 않았습니다');
+    } else if (event.error === 'not-allowed') {
+      setStatus('error', '마이크 권한을 허용해주세요');
+    } else {
+      setStatus('error', `오류: ${event.error}`);
+    }
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    document.getElementById('micBtn').classList.remove('listening');
+
+    if (settings.continuous && isListening) {
+      // 연속 모드에서 자동 재시작
+      try { recognition.start(); } catch(e) {}
+    } else {
+      document.getElementById('micLabel').textContent = '탭하여 시작';
+      if (document.getElementById('statusDot').classList.contains('listening')) {
+        setStatus('ready', '준비');
+      }
+    }
+  };
+
+  setStatus('ready', '준비');
+  return true;
+}
+
+function toggleListening() {
+  if (!recognition && !initSpeechRecognition()) return;
+
+  if (isListening) {
+    recognition.stop();
+    isListening = false;
+    setStatus('ready', '준비');
+  } else {
+    recognition.continuous = settings.continuous;
+    try {
+      recognition.start();
+    } catch(e) {
+      // 이미 시작된 경우
+      recognition.stop();
+      setTimeout(() => { try { recognition.start(); } catch(e2) {} }, 200);
+    }
+  }
+}
+
+// ═══════════════════════════════════════
+// 결과 처리
+// ═══════════════════════════════════════
+function processResult(alternatives) {
+  const primary = alternatives[0].transcript;
+
+  // 모든 대체 후보에 대해 파싱 시도
+  let bestParsed = null;
+  let bestAltIdx = 0;
+
+  for (let i = 0; i < alternatives.length; i++) {
+    const parsed = parseUtterance(alternatives[i].transcript);
+    if (!parsed) continue;
+
+    if (!bestParsed) {
+      bestParsed = parsed;
+      bestAltIdx = i;
+    } else if (parsed.matchScore > bestParsed.matchScore) {
+      bestParsed = parsed;
+      bestAltIdx = i;
+    }
+  }
+
+  if (!bestParsed) {
+    addResultCard({
+      raw: primary,
+      alternatives,
+      field: null,
+      value: null,
+      status: 'fail',
+      message: '파싱 실패 - "항목 숫자" 형태로 말해주세요'
+    });
+    return;
+  }
+
+  // 값 검증
+  let status = 'success';
+  let message = '';
+  const validation = validateValue(bestParsed.field, bestParsed.value);
+
+  if (bestParsed.matchMethod === 'new') {
+    status = 'new-field';
+    message = `새 항목 "${bestParsed.rawField}" 추가`;
+  } else if (!validation.valid) {
+    status = 'warning';
+    message = validation.warning;
+  } else if (bestParsed.matchScore < 0.8) {
+    status = 'warning';
+    message = `"${bestParsed.rawField}" → "${bestParsed.field}" (유사도 ${Math.round(bestParsed.matchScore*100)}%)`;
+  }
+
+  const entry = {
+    raw: primary,
+    alternatives,
+    field: bestParsed.field,
+    value: bestParsed.value,
+    rawField: bestParsed.rawField,
+    matchScore: bestParsed.matchScore,
+    matchMethod: bestParsed.matchMethod,
+    status,
+    message,
+    bestAltIdx,
+    timestamp: new Date()
+  };
+
+  results.push(entry);
+  addResultCard(entry);
+
+  // TTS 피드백
+  if (settings.tts && bestParsed.field) {
+    speak(`${bestParsed.field}, ${bestParsed.value}`);
+  }
+
+  // 토스트 표시
+  if (bestParsed.field) {
+    showToast(bestParsed.field, bestParsed.value);
+  }
+}
+
+// ═══════════════════════════════════════
+// UI 업데이트
+// ═══════════════════════════════════════
+function addResultCard(entry) {
+  const empty = document.getElementById('emptyState');
+  if (empty) empty.style.display = 'none';
+
+  const area = document.getElementById('resultArea');
+  const card = document.createElement('div');
+  card.className = `result-card ${entry.status}`;
+
+  let html = `<div class="result-raw">🎙️ "${entry.raw}"</div>`;
+
+  if (entry.field && entry.value !== null) {
+    html += `
+      <div class="result-parsed">
+        <span class="result-field">${entry.field}</span>
+        <span class="result-value">${entry.value}</span>
+      </div>`;
+  }
+
+  if (entry.message) {
+    const msgColor = entry.status === 'success' ? 'var(--green)'
+      : entry.status === 'new-field' ? 'var(--blue)'
+      : entry.status === 'warning' ? 'var(--orange)'
+      : 'var(--red)';
+    html += `<div style="font-size:11px;color:${msgColor};margin-top:4px">${entry.message}</div>`;
+  }
+
+  // 메타 정보
+  const meta = SURVEY_FIELDS[entry.field];
+  if (meta) {
+    html += `<div class="result-meta">
+      <span class="tag">${meta.unit || '-'}</span>
+      <span class="tag match-score">매칭: ${entry.matchMethod} (${Math.round(entry.matchScore*100)}%)</span>
+      ${meta.range ? `<span class="tag">범위: ${meta.range[0]}~${meta.range[1]}</span>` : ''}
+    </div>`;
+  } else if (entry.status === 'new-field') {
+    html += `<div class="result-meta"><span class="tag new-tag">🆕 새 항목</span></div>`;
+  }
+
+  // 대체 후보 표시
+  if (settings.alts && entry.alternatives && entry.alternatives.length > 1) {
+    html += `<div class="alt-list">📋 대체 후보:`;
+    entry.alternatives.forEach((alt, i) => {
+      const cls = i === entry.bestAltIdx ? 'best' : '';
+      html += `<span class="${cls}">${i+1}. "${alt.transcript}" (${Math.round(alt.confidence*100)}%)${i === entry.bestAltIdx ? ' ✓' : ''}</span>`;
+    });
+    html += `</div>`;
+  }
+
+  card.innerHTML = html;
+  area.insertBefore(card, area.firstChild);
+}
+
+function setStatus(type, text) {
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  dot.className = 'status-dot ' + type;
+  txt.textContent = text;
+}
+
+function showToast(field, value) {
+  const toast = document.getElementById('toast');
+  document.getElementById('toastField').textContent = field;
+  document.getElementById('toastValue').textContent = value;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 1500);
+}
+
+// ═══════════════════════════════════════
+// TTS
+// ═══════════════════════════════════════
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'ko-KR';
+  u.rate = 1.1;
+  u.pitch = 1.0;
+  window.speechSynthesis.speak(u);
+}
+
+// ═══════════════════════════════════════
+// 설정 / 유틸
+// ═══════════════════════════════════════
+function toggleSettings() {
+  document.getElementById('settingsPanel').classList.toggle('open');
+}
+
+function toggleSetting(key) {
+  settings[key] = !settings[key];
+  document.getElementById({
+    tts: 'toggleTTS',
+    alts: 'toggleAlts',
+    continuous: 'toggleCont'
+  }[key]).classList.toggle('on');
+}
+
+function clearResults() {
+  results.length = 0;
+  const area = document.getElementById('resultArea');
+  area.innerHTML = `<div class="empty-state" id="emptyState">
+    <div class="icon">🎤</div>
+    <div class="msg">마이크 버튼을 누르고<br><strong>"종경 22.5"</strong> 처럼 말해보세요</div>
+  </div>`;
+}
+
+function exportLog() {
+  if (results.length === 0) { alert('기록이 없습니다'); return; }
+  const lines = results.map(r =>
+    `${r.timestamp?.toLocaleTimeString('ko-KR') || '-'}\t${r.raw}\t→\t${r.field || '?'}\t${r.value ?? '?'}\t(${r.matchMethod}, ${Math.round(r.matchScore*100)}%)`
+  );
+  const text = lines.join('\n');
+
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => alert('클립보드에 복사됨'));
+  } else {
+    // iOS fallback
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('클립보드에 복사됨');
+  }
+}
+
+// 등록 항목 칩 표시
+function renderTerms() {
+  const el = document.getElementById('termsList');
+  el.innerHTML = fieldNames.map(f => `<span class="term-chip">${f}</span>`).join('');
+}
+
+// ═══════════════════════════════════════
+// 초기화
+// ═══════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  // standalone PWA 모드 감지 → 경고
+  if (window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
+    setStatus('error', '⚠️ Safari 탭에서 열어주세요 (홈화면 앱 모드에서는 음성인식 불가)');
+    document.getElementById('emptyState').querySelector('.msg').innerHTML =
+      '⚠️ <strong>Safari 탭에서 직접 열어주세요</strong><br>홈 화면 추가 모드에서는<br>음성인식이 작동하지 않습니다.';
+  }
+  renderTerms();
+  initSpeechRecognition();
+});
+</script>
+</body>
+</html>
