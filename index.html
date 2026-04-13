@@ -98,7 +98,7 @@
     <div id="gemmaModelRow" style="margin-top:8px;display:none">
       <label>Gemma 모델
         <select id="gemmaModelSelect" onchange="window.changeGemmaModel(this.value)">
-          <option value="onnx-community/gemma-4-E2B-it-ONNX">Gemma 4 E2B (~500MB, 자동 최적화)</option>
+          <option value="gemma-4-e2b">Gemma 4 E2B (~500MB, 자동 최적화)</option>
         </select>
       </label>
     </div>
@@ -170,7 +170,37 @@ const MODEL_CONFIGS = {
   'whisper-tiny': {label: 'Whisper tiny', modelId: 'onnx-community/whisper-tiny', dtype: 'q8'},
   'whisper-base': {label: 'Whisper base', modelId: 'onnx-community/whisper-base', dtype: 'q8'},
 };
-const GEMMA_DEFAULT_MODEL = 'onnx-community/gemma-4-E2B-it-ONNX';
+const GEMMA_MODEL_CONFIGS = {
+  'gemma-4-e2b': {
+    label: 'Gemma 4 E2B (~500MB)',
+    modelId: 'onnx-community/gemma-4-E2B-it-ONNX',
+    dtypeWebGPU: 'q4f16',
+    dtypeWASM: 'q8',
+  },
+};
+const GEMMA_DEFAULT_MODEL_KEY = 'gemma-4-e2b';
+const GEMMA_ALIAS_HINTS = [
+  '변경=횡경', '행경=횡경', '은경=횡경', '엔경=횡경', '현경=횡경', '안경=횡경',
+  '존경=종경', '동경=종경', '정경=종경',
+  '거실=과실', '마실=과실', '바실=과실', '아실=과실',
+  '나무=조사나무', '과피=과피두께',
+];
+
+function sanitizeGemmaModelKey(value) {
+  if (!value) return GEMMA_DEFAULT_MODEL_KEY;
+  if (Object.prototype.hasOwnProperty.call(GEMMA_MODEL_CONFIGS, value)) return value;
+  if (value === GEMMA_MODEL_CONFIGS[GEMMA_DEFAULT_MODEL_KEY].modelId) return GEMMA_DEFAULT_MODEL_KEY;
+  if (/^onnx-community\/gemma-4-E2B-it-ONNX-q(?:8|4|4f16)$/.test(value)) return GEMMA_DEFAULT_MODEL_KEY;
+  return GEMMA_DEFAULT_MODEL_KEY;
+}
+
+function getGemmaConfig(modelKey = gemmaModelKey) {
+  return GEMMA_MODEL_CONFIGS[modelKey] || GEMMA_MODEL_CONFIGS[GEMMA_DEFAULT_MODEL_KEY];
+}
+
+function getGemmaModelId(modelKey = gemmaModelKey) {
+  return getGemmaConfig(modelKey).modelId;
+}
 
 const VAD_MODES = {
   fast:    {label: '빠른 반응', silenceMs: 850,  minMs: 350, maxMs: 5200, preRollMs: 420},
@@ -218,7 +248,7 @@ const UNIT_RE = /(밀리미터|미리미터|밀리|미리|mm|엠엠|브릭스|br
 let prefs = loadPrefs();
 let engineMode   = prefs.engineMode   || 'webspeech';
 let vadMode      = prefs.vadMode      || 'fast';
-let gemmaModelId = prefs.gemmaModelId || GEMMA_DEFAULT_MODEL;
+let gemmaModelKey = prefs.gemmaModelKey || GEMMA_DEFAULT_MODEL_KEY;
 
 // Whisper state
 let transcriber   = null;
@@ -306,7 +336,7 @@ function getSessionInfo() {
     engineMode,
     vadMode,
     gemmaEnabled:     gemmaLoaded && engineMode === 'webspeech-gemma',
-    gemmaModelId:     (gemmaLoaded && engineMode === 'webspeech-gemma') ? gemmaModelId : null,
+    gemmaModelId:     (gemmaLoaded && engineMode === 'webspeech-gemma') ? getGemmaModelId() : null,
     customFieldCount: Object.keys(customFields).length,
     totalRecognitions:totalRecognitionCount,
     sessionStartedAt,
@@ -327,19 +357,30 @@ document.getElementById('engineSelect').value = engineMode;
 document.getElementById('modeSelect').value   = vadMode;
 const gms = document.getElementById('gemmaModelSelect');
 if (gms) {
-  // Set value only if option exists, otherwise keep default
-  if ([...gms.options].some(o => o.value === gemmaModelId)) gms.value = gemmaModelId;
+  if ([...gms.options].some(o => o.value === gemmaModelKey)) gms.value = gemmaModelKey;
 }
 syncControls();
 updateStats();
 renderCustomFieldList();
+if (prefs._needsResave) savePrefs();
 
 // ---- Prefs / Storage ----
 function loadPrefs() {
-  try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}'); } catch { return {}; }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
+    const storedGemma = parsed.gemmaModelKey || parsed.gemmaModelId || null;
+    const gemmaModelKey = sanitizeGemmaModelKey(storedGemma);
+    return {
+      ...parsed,
+      gemmaModelKey,
+      _needsResave: gemmaModelKey !== storedGemma || Object.prototype.hasOwnProperty.call(parsed, 'gemmaModelId'),
+    };
+  } catch {
+    return {gemmaModelKey: GEMMA_DEFAULT_MODEL_KEY, _needsResave: false};
+  }
 }
 function savePrefs() {
-  localStorage.setItem(PREF_KEY, JSON.stringify({engineMode, vadMode, gemmaModelId}));
+  localStorage.setItem(PREF_KEY, JSON.stringify({engineMode, vadMode, gemmaModelKey}));
 }
 function loadLogs() {
   try { const parsed = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
@@ -433,10 +474,11 @@ window.changeVadMode = function(next) {
   setStatus('ok', `${VAD_MODES[vadMode].label} 모드`);
 };
 window.changeGemmaModel = function(next) {
-  gemmaModelId  = next;
+  gemmaModelKey = sanitizeGemmaModelKey(next);
   gemmaLoaded   = false;
   window._gemmaProcessor = null;
   window._gemmaModel     = null;
+  window._gemmaDevice    = null;
   savePrefs();
   syncControls();
 };
@@ -493,6 +535,8 @@ window.loadModel = async function() {
 async function loadGemmaModel() {
   if (gemmaLoading) return;
   gemmaLoading = true;
+  const gemmaCfg = getGemmaConfig();
+  const modelId = gemmaCfg.modelId;
   const btn    = document.getElementById('btnLoad');
   const status = document.getElementById('modelStatus');
   btn.textContent = '로딩중';
@@ -505,53 +549,76 @@ async function loadGemmaModel() {
     env.allowLocalModels = false;
     try { env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1)); } catch {}
 
-    // WebGPU 지원 여부 확인 후 최적 디바이스 선택
-    let device = 'wasm';
-    let dtype  = 'q8';
+    const loadTargets = [];
     try {
       if ('gpu' in navigator) {
         const adapter = await navigator.gpu.requestAdapter();
-        if (adapter) { device = 'webgpu'; dtype = 'q4f16'; }
+        if (adapter) loadTargets.push({device: 'webgpu', dtype: gemmaCfg.dtypeWebGPU});
       }
     } catch {}
+    loadTargets.push({device: 'wasm', dtype: gemmaCfg.dtypeWASM});
 
-    const progressCb = (p) => {
+    const progressCb = (p, target) => {
       const fill = document.getElementById('progFill');
       if (!fill) return;
-      if (p.status === 'progress' && p.total) {
-        const pct = Math.round(p.loaded / p.total * 100);
+      if (p?.status === 'progress_total' && Number.isFinite(Number(p?.progress))) {
+        const pct = Math.max(0, Math.min(100, Math.round(Number(p.progress))));
         fill.style.width = pct + '%';
-        const mb = (p.loaded / 1048576).toFixed(0);
-        if (status.firstChild) status.firstChild.textContent = `Gemma 4 로딩 ${p.file || ''} ${pct}% (${mb}MB, ${device})`;
+        if (status.firstChild) status.firstChild.textContent = `Gemma 4 로딩 ${pct}% (${target.device})`;
+        return;
+      }
+      const total = Number(p?.total ?? p?.progress_total ?? 0);
+      const loaded = Number(p?.loaded ?? p?.progress ?? 0);
+      if (total > 0 && loaded >= 0) {
+        const pct = Math.min(100, Math.round(loaded / total * 100));
+        fill.style.width = pct + '%';
+        const loadedMb = (loaded / 1048576).toFixed(0);
+        const totalMb = (total / 1048576).toFixed(0);
+        if (status.firstChild) status.firstChild.textContent = `Gemma 4 로딩 ${p.file || ''} ${pct}% (${loadedMb}/${totalMb}MB, ${target.device})`;
       }
       if (p.status === 'ready') fill.style.width = '100%';
     };
 
-    // AutoProcessor: tokenizer + preprocessing 통합 (텍스트 전용에도 사용 가능)
-    const processor = await AutoProcessor.from_pretrained(gemmaModelId, {progress_callback: progressCb});
-    const model = await Gemma4ForConditionalGeneration.from_pretrained(gemmaModelId, {
-      dtype,
-      device,
-      progress_callback: progressCb,
-    });
-
-    window._gemmaProcessor = processor;
-    window._gemmaModel     = model;
-    window._gemmaDevice    = device;
-    gemmaLoaded  = true;
-    gemmaLoading = false;
-    btn.textContent = 'Gemma 재로드';
-    btn.classList.remove('disabled');
-    recordSystemLog('gemma-load', {modelId: gemmaModelId, device, dtype, ms: Math.round(performance.now() - loadStarted)});
-    syncControls();
-    setStatus('ok', `Gemma 4 준비 완료 (${device}, ${dtype})`);
+    let lastError = null;
+    for (const target of loadTargets) {
+      try {
+        if (status.firstChild) status.firstChild.textContent = `Gemma 4 로딩 시작 (${target.device}, ${target.dtype})`;
+        const processor = await AutoProcessor.from_pretrained(modelId, {
+          progress_callback: (p) => progressCb(p, target),
+        });
+        const model = await Gemma4ForConditionalGeneration.from_pretrained(modelId, {
+          dtype: target.dtype,
+          device: target.device,
+          progress_callback: (p) => progressCb(p, target),
+        });
+        window._gemmaProcessor = processor;
+        window._gemmaModel     = model;
+        window._gemmaDevice    = target.device;
+        window._gemmaDtype     = target.dtype;
+        gemmaLoaded  = true;
+        gemmaLoading = false;
+        btn.textContent = 'Gemma 재로드';
+        btn.classList.remove('disabled');
+        recordSystemLog('gemma-load', {modelId, device: target.device, dtype: target.dtype, ms: Math.round(performance.now() - loadStarted)});
+        syncControls();
+        setStatus('ok', `Gemma 4 준비 완료 (${target.device}, ${target.dtype})`);
+        return;
+      } catch (e) {
+        lastError = e;
+        recordSystemLog('gemma-load-attempt-failed', {modelId, device: target.device, dtype: target.dtype, error: e.message});
+        if (target.device === 'webgpu' && loadTargets.length > 1 && status.firstChild) {
+          status.firstChild.textContent = `WebGPU 로드 실패, WASM으로 재시도 중... (${escapeHtml(e.message)})`;
+        }
+      }
+    }
+    throw lastError || new Error('Gemma 모델 초기화 실패');
   } catch(e) {
     gemmaLoading = false;
     btn.textContent = 'Gemma 재시도';
     btn.classList.remove('disabled');
     status.className = 'model-status error';
     status.innerHTML = `Gemma 로드 실패: ${escapeHtml(e.message)}<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
-    recordSystemLog('gemma-load-error', {modelId: gemmaModelId, error: e.message});
+    recordSystemLog('gemma-load-error', {modelId, error: e.message});
     setStatus('err', 'Gemma 로드 실패');
   }
 }
@@ -1148,53 +1215,17 @@ async function gemmaCorrectAsync(rawText, logId, fuzzyParsed) {
   const gemmaStart = performance.now();
   try {
     const promptText = buildGemmaPrompt(rawText);
-
-    // apply_chat_template: content 배열 형식 (Gemma 4 multimodal 스타일)
-    let formattedPrompt = promptText;
-    try {
-      if (typeof processor.apply_chat_template === 'function') {
-        formattedPrompt = processor.apply_chat_template(
-          [{role: 'user', content: [{type: 'text', text: promptText}]}],
-          {tokenize: false, add_generation_prompt: true}
-        );
-      }
-    } catch {
-      // content 배열 미지원 시 문자열 형식 시도
-      try {
-        if (typeof processor.apply_chat_template === 'function') {
-          formattedPrompt = processor.apply_chat_template(
-            [{role: 'user', content: promptText}],
-            {tokenize: false, add_generation_prompt: true}
-          );
-        }
-      } catch {}
-    }
-
-    const inputs    = processor(formattedPrompt, {return_tensors: 'pt'});
-    const inputLen  = inputs.input_ids.dims ? inputs.input_ids.dims[1] : (inputs.input_ids[0]?.length || 0);
+    const {formattedPrompt, inputs} = await buildGemmaInputs(processor, promptText);
+    const inputLen = getInputTokenLength(inputs);
     const outputIds = await model.generate({
       ...inputs,
       max_new_tokens: 10,
       do_sample: false,
+      temperature: 0.1,
     });
     const latencyMs = Math.round(performance.now() - gemmaStart);
 
-    // 생성된 토큰만 디코딩: 입력 길이 이후 부분
-    let generated = '';
-    try {
-      const fullDecoded  = processor.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
-      const inputDecoded = processor.decode(inputs.input_ids[0], {skip_special_tokens: true}) || '';
-      const afterPrompt  = fullDecoded.slice(inputDecoded.length).trim();
-      generated = afterPrompt.split('\n')[0].trim();
-      // 폴백: 마커 기반 추출
-      if (!generated) {
-        const idx = Math.max(fullDecoded.lastIndexOf('보정:'), fullDecoded.lastIndexOf('보정결과만:'));
-        if (idx >= 0) generated = fullDecoded.slice(idx).replace(/보정[결과만]*:/, '').trim().split('\n')[0].trim();
-        else generated = fullDecoded.trim().split('\n').slice(-1)[0].trim();
-      }
-    } catch {
-      generated = '';
-    }
+    const generated = extractGemmaOutputText(processor, outputIds, inputs, inputLen, formattedPrompt);
     if (!generated) return;
 
     const gemmaParsed = parseUtterance(generated);
@@ -1204,7 +1235,7 @@ async function gemmaCorrectAsync(rawText, logId, fuzzyParsed) {
     // Update log entry with Gemma result
     const logEntry = feedbackLogs.find(l => l.id === logId);
     if (logEntry) {
-      logEntry.gemma = {inputText: rawText, outputText: generated, latencyMs, corrected, modelId: gemmaModelId};
+      logEntry.gemma = {inputText: rawText, outputText: generated, latencyMs, corrected, modelId: getGemmaModelId()};
       persistLogs();
     }
 
@@ -1230,22 +1261,94 @@ async function gemmaCorrectAsync(rawText, logId, fuzzyParsed) {
         }
       }
     }
-    recordSystemLog('gemma-correction', {logId, inputText: rawText, outputText: generated, corrected, latencyMs, modelId: gemmaModelId});
+    recordSystemLog('gemma-correction', {logId, inputText: rawText, outputText: generated, corrected, latencyMs, modelId: getGemmaModelId()});
   } catch(e) {
-    recordSystemLog('gemma-error', {logId, error: e.message, modelId: gemmaModelId});
+    recordSystemLog('gemma-error', {logId, error: e.message, modelId: getGemmaModelId()});
   }
 }
 
 function buildGemmaPrompt(text) {
-  const fieldList = Object.keys(FIELDS).join(',');
-  // Compact alias dict: top 2-3 per field to keep token count low
-  const dictPairs = [];
-  for (const [field, meta] of Object.entries(FIELDS)) {
-    for (const alias of (meta.aliases || []).slice(0, 2)) {
-      if (alias !== field) dictPairs.push(`${alias}=${field}`);
+  const fieldList = Object.keys(FIELDS).join(', ');
+  return `감귤조사 보정.\n항목: ${fieldList}\n사전: ${GEMMA_ALIAS_HINTS.join(', ')}\n입력: "${text}"\n보정결과만:`;
+}
+
+async function buildGemmaInputs(processor, promptText) {
+  let formattedPrompt = promptText;
+  try {
+    if (typeof processor.apply_chat_template === 'function') {
+      formattedPrompt = processor.apply_chat_template(
+        [{role: 'user', content: [{type: 'text', text: promptText}]}],
+        {tokenize: false, add_generation_prompt: true}
+      );
     }
+  } catch {
+    try {
+      if (typeof processor.apply_chat_template === 'function') {
+        formattedPrompt = processor.apply_chat_template(
+          [{role: 'user', content: promptText}],
+          {tokenize: false, add_generation_prompt: true}
+        );
+      }
+    } catch {}
   }
-  return `감귤조사 음성인식 보정.\n항목: ${fieldList}\n사전: ${dictPairs.join(',')}\n입력: "${text}"\n보정:`;
+
+  try {
+    return {
+      formattedPrompt,
+      inputs: await processor(formattedPrompt, null, null, {add_special_tokens: false}),
+    };
+  } catch {
+    return {
+      formattedPrompt,
+      inputs: await processor(formattedPrompt),
+    };
+  }
+}
+
+function getInputTokenLength(inputs) {
+  const dims = inputs?.input_ids?.dims;
+  if (Array.isArray(dims) && dims.length) return dims[dims.length - 1];
+  const values = inputs?.input_ids?.[0];
+  if (Array.isArray(values)) return values.length;
+  return 0;
+}
+
+function decodeInputText(processor, inputs) {
+  try {
+    if (typeof processor.batch_decode === 'function') {
+      return processor.batch_decode(inputs.input_ids, {skip_special_tokens: true})[0] || '';
+    }
+  } catch {}
+  try {
+    if (typeof processor.decode === 'function' && inputs?.input_ids?.[0]) {
+      return processor.decode(inputs.input_ids[0], {skip_special_tokens: true}) || '';
+    }
+  } catch {}
+  return '';
+}
+
+function extractGemmaOutputText(processor, outputIds, inputs, inputLen, formattedPrompt) {
+  try {
+    if (typeof outputIds?.slice === 'function' && inputLen) {
+      const generatedTokens = outputIds.slice(null, [inputLen, null]);
+      const generated = processor.batch_decode(generatedTokens, {skip_special_tokens: true})[0] || '';
+      const trimmed = generated.trim().split('\n')[0].trim();
+      if (trimmed) return trimmed;
+    }
+  } catch {}
+
+  try {
+    const fullDecoded  = processor.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
+    const inputDecoded = decodeInputText(processor, inputs);
+    const afterPrompt  = inputDecoded ? fullDecoded.slice(inputDecoded.length).trim() : fullDecoded.replace(formattedPrompt, '').trim();
+    const firstLine    = afterPrompt.split('\n')[0].trim();
+    if (firstLine) return firstLine;
+    const idx = Math.max(fullDecoded.lastIndexOf('보정:'), fullDecoded.lastIndexOf('보정결과만:'));
+    if (idx >= 0) return fullDecoded.slice(idx).replace(/보정[결과만]*:/, '').trim().split('\n')[0].trim();
+    return fullDecoded.trim().split('\n').slice(-1)[0].trim();
+  } catch {
+    return '';
+  }
 }
 
 // ---- Logging ----

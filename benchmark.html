@@ -50,7 +50,7 @@
   <div class="row">
     <label>모델
       <select id="modelSelect">
-        <option value="onnx-community/gemma-4-E2B-it-ONNX">Gemma 4 E2B (~500MB, 자동 최적화)</option>
+        <option value="gemma-4-e2b">Gemma 4 E2B (~500MB, 자동 최적화)</option>
       </select>
     </label>
     <label>디바이스
@@ -93,6 +93,20 @@
 </div>
 
 <script type="module">
+const GEMMA_MODEL_CONFIGS = {
+  'gemma-4-e2b': {
+    modelId: 'onnx-community/gemma-4-E2B-it-ONNX',
+    dtypeWebGPU: 'q4f16',
+    dtypeWASM: 'q8',
+  },
+};
+const GEMMA_ALIAS_HINTS = [
+  '변경=횡경', '행경=횡경', '은경=횡경', '엔경=횡경', '현경=횡경', '안경=횡경',
+  '존경=종경', '동경=종경', '정경=종경',
+  '거실=과실', '마실=과실', '바실=과실', '아실=과실',
+  '나무=조사나무', '과피=과피두께',
+];
+
 const TEST_CASES = [
   {input: '변경 22.5',   expected: '횡경 22.5'},
   {input: '존경 35.7',   expected: '종경 35.7'},
@@ -107,12 +121,16 @@ const TEST_CASES = [
 ];
 
 const FIELDS_LIST = ['조사나무','조사과실','횡경','종경','과중','당도','산도','착색','경도','과피두께','비타민C','구연산','과즙량','씨수','비고'];
-const DICT = '변경=횡경,존경=종경,거실=과실,행경=횡경,은경=횡경,엔경=횡경,마실=과실,동경=종경,바실=과실,아실=과실,나무=조사나무,과피=과피두께';
 
-let benchTokenizer = null;
+let benchProcessor = null;
 let benchModel     = null;
 let benchResults   = [];
 let loadMs         = 0;
+let benchRuntime   = {modelId: null, device: null, dtype: null};
+
+function getGemmaConfig(modelKey) {
+  return GEMMA_MODEL_CONFIGS[modelKey] || GEMMA_MODEL_CONFIGS['gemma-4-e2b'];
+}
 
 // Show device info
 function getGPUInfo() {
@@ -167,7 +185,9 @@ function log(msg) {
 }
 
 window.loadBenchModel = async function() {
-  const modelId     = document.getElementById('modelSelect').value;
+  const modelKey    = document.getElementById('modelSelect').value;
+  const modelCfg    = getGemmaConfig(modelKey);
+  const modelId     = modelCfg.modelId;
   let   device      = document.getElementById('deviceSelect').value;
   const btn         = document.getElementById('btnLoad');
   const fill        = document.getElementById('progFill');
@@ -182,8 +202,10 @@ window.loadBenchModel = async function() {
       if (!adapter) { device = 'wasm'; log('WebGPU 미지원 → WASM 폴백'); }
     } catch { device = 'wasm'; log('WebGPU 초기화 실패 → WASM 폴백'); }
   }
-  const dtype = device === 'webgpu' ? 'q4f16' : 'q8';
-  log(`디바이스: ${device}, dtype: ${dtype}`);
+  const loadTargets = [];
+  if (device === 'webgpu') loadTargets.push({device: 'webgpu', dtype: modelCfg.dtypeWebGPU});
+  loadTargets.push({device: 'wasm', dtype: modelCfg.dtypeWASM});
+  log(`우선 디바이스: ${loadTargets[0].device}, dtype: ${loadTargets[0].dtype}`);
 
   const t0 = performance.now();
   try {
@@ -191,34 +213,64 @@ window.loadBenchModel = async function() {
     env.allowLocalModels = false;
     try { env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1)); } catch {}
 
-    const progressCb = (p) => {
-      if (p.status === 'progress' && p.total) {
-        const pct = Math.round(p.loaded / p.total * 100);
+    const progressCb = (p, target) => {
+      if (p?.status === 'progress_total' && Number.isFinite(Number(p?.progress))) {
+        const pct = Math.max(0, Math.min(100, Math.round(Number(p.progress))));
         fill.style.width = pct + '%';
-        log(`  ${p.file || 'model'} ${pct}%`);
+        log(`  ${target.device} 전체 진행률 ${pct}%`);
+        return;
+      }
+      const total = Number(p?.total ?? p?.progress_total ?? 0);
+      const loaded = Number(p?.loaded ?? p?.progress ?? 0);
+      if (total > 0 && loaded >= 0) {
+        const pct = Math.min(100, Math.round(loaded / total * 100));
+        fill.style.width = pct + '%';
+        const loadedMb = (loaded / 1048576).toFixed(0);
+        const totalMb  = (total / 1048576).toFixed(0);
+        log(`  ${target.device} ${p.file || 'model'} ${pct}% (${loadedMb}/${totalMb}MB)`);
       }
       if (p.status === 'ready') fill.style.width = '100%';
     };
 
-    log('AutoProcessor 로드 중...');
-    benchTokenizer = await AutoProcessor.from_pretrained(modelId, {progress_callback: progressCb});
-    log('Gemma4ForConditionalGeneration 로드 중...');
-    benchModel = await Gemma4ForConditionalGeneration.from_pretrained(modelId, {dtype, device, progress_callback: progressCb});
+    let lastError = null;
+    for (const target of loadTargets) {
+      try {
+        log(`AutoProcessor 로드 중... (${target.device}, ${target.dtype})`);
+        benchProcessor = await AutoProcessor.from_pretrained(modelId, {
+          progress_callback: (p) => progressCb(p, target),
+        });
+        log('Gemma4ForConditionalGeneration 로드 중...');
+        benchModel = await Gemma4ForConditionalGeneration.from_pretrained(modelId, {
+          dtype: target.dtype,
+          device: target.device,
+          progress_callback: (p) => progressCb(p, target),
+        });
+        benchRuntime = {modelId, device: target.device, dtype: target.dtype};
+        loadMs = Math.round(performance.now() - t0);
+        log(`✓ 모델 로드 완료: ${loadMs}ms (${target.device}, ${target.dtype})`);
+        btn.textContent = '재로드';
+        btn.classList.remove('disabled');
+        document.getElementById('btnRun').classList.remove('disabled');
+        return;
+      } catch (e) {
+        lastError = e;
+        log(`  ${target.device} 로드 실패: ${e.message}`);
+      }
+    }
 
-    loadMs = Math.round(performance.now() - t0);
-    log(`✓ 모델 로드 완료: ${loadMs}ms`);
-    btn.textContent = '재로드';
-    btn.classList.remove('disabled');
-    document.getElementById('btnRun').classList.remove('disabled');
+    throw lastError || new Error('모델 로드 실패');
   } catch(e) {
     log(`✗ 로드 실패: ${e.message}`);
     btn.textContent = '재시도';
     btn.classList.remove('disabled');
+    benchProcessor = null;
+    benchModel = null;
+    benchRuntime = {modelId: null, device: null, dtype: null};
   }
 };
 
 window.runBenchmark = async function() {
-  if (!benchTokenizer || !benchModel) { log('먼저 모델을 로드하세요'); return; }
+  if (!benchProcessor || !benchModel) { log('먼저 모델을 로드하세요'); return; }
   document.getElementById('btnRun').classList.add('disabled');
   benchResults = [];
   const times = [];
@@ -240,35 +292,9 @@ window.runBenchmark = async function() {
     let ok       = false;
 
     try {
-      let formattedPrompt = prompt;
-      try {
-        if (typeof benchTokenizer.apply_chat_template === 'function') {
-          formattedPrompt = benchTokenizer.apply_chat_template(
-            [{role: 'user', content: [{type: 'text', text: prompt}]}],
-            {tokenize: false, add_generation_prompt: true}
-          );
-        }
-      } catch {
-        try {
-          if (typeof benchTokenizer.apply_chat_template === 'function') {
-            formattedPrompt = benchTokenizer.apply_chat_template(
-              [{role: 'user', content: prompt}],
-              {tokenize: false, add_generation_prompt: true}
-            );
-          }
-        } catch {}
-      }
-      const inputs    = benchTokenizer(formattedPrompt, {return_tensors: 'pt'});
-      const outputIds = await benchModel.generate({...inputs, max_new_tokens: 10, do_sample: false});
-      const fullDec   = benchTokenizer.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
-      const inputDec  = benchTokenizer.decode(inputs.input_ids[0], {skip_special_tokens: true}) || '';
-      const afterPr   = fullDec.slice(inputDec.length).trim();
-      output = afterPr.split('\n')[0].trim();
-      if (!output) {
-        const idx = Math.max(fullDec.lastIndexOf('보정:'), fullDec.lastIndexOf('보정결과만:'));
-        output = idx >= 0 ? fullDec.slice(idx).replace(/보정[결과만]*:/, '').trim().split('\n')[0].trim()
-                          : fullDec.trim().split('\n').slice(-1)[0].trim();
-      }
+      const {formattedPrompt, inputs} = await buildGemmaInputs(benchProcessor, prompt);
+      const outputIds = await benchModel.generate({...inputs, max_new_tokens: 10, do_sample: false, temperature: 0.1});
+      output = extractGemmaOutputText(benchProcessor, outputIds, inputs, formattedPrompt);
     } catch(e) {
       output = `ERROR: ${e.message}`;
     }
@@ -304,7 +330,7 @@ window.runBenchmark = async function() {
 };
 
 function buildPrompt(text) {
-  return `보정: ${FIELDS_LIST.join(',')}\n사전: ${DICT}\n입력: "${text}"\n출력:`;
+  return `감귤조사 보정.\n항목: ${FIELDS_LIST.join(', ')}\n사전: ${GEMMA_ALIAS_HINTS.join(', ')}\n입력: "${text}"\n보정결과만:`;
 }
 
 function normalizedMatch(output, expected) {
@@ -319,8 +345,9 @@ window.exportResults = function() {
   const times  = benchResults.map(r => r.ms);
   const data   = {
     timestamp:    new Date().toISOString(),
-    modelId:      document.getElementById('modelSelect').value,
-    device:       document.getElementById('deviceSelect').value,
+    modelId:      benchRuntime.modelId || getGemmaConfig(document.getElementById('modelSelect').value).modelId,
+    device:       benchRuntime.device || document.getElementById('deviceSelect').value,
+    dtype:        benchRuntime.dtype || null,
     loadMs,
     stats: {
       accuracy:   Math.round(benchResults.filter(r => r.ok).length / benchResults.length * 100),
@@ -356,6 +383,86 @@ window.exportResults = function() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 };
+
+async function buildGemmaInputs(processor, promptText) {
+  let formattedPrompt = promptText;
+  try {
+    if (typeof processor.apply_chat_template === 'function') {
+      formattedPrompt = processor.apply_chat_template(
+        [{role: 'user', content: [{type: 'text', text: promptText}]}],
+        {tokenize: false, add_generation_prompt: true}
+      );
+    }
+  } catch {
+    try {
+      if (typeof processor.apply_chat_template === 'function') {
+        formattedPrompt = processor.apply_chat_template(
+          [{role: 'user', content: promptText}],
+          {tokenize: false, add_generation_prompt: true}
+        );
+      }
+    } catch {}
+  }
+
+  try {
+    return {
+      formattedPrompt,
+      inputs: await processor(formattedPrompt, null, null, {add_special_tokens: false}),
+    };
+  } catch {
+    return {
+      formattedPrompt,
+      inputs: await processor(formattedPrompt),
+    };
+  }
+}
+
+function getInputTokenLength(inputs) {
+  const dims = inputs?.input_ids?.dims;
+  if (Array.isArray(dims) && dims.length) return dims[dims.length - 1];
+  const values = inputs?.input_ids?.[0];
+  if (Array.isArray(values)) return values.length;
+  return 0;
+}
+
+function decodeInputText(processor, inputs) {
+  try {
+    if (typeof processor.batch_decode === 'function') {
+      return processor.batch_decode(inputs.input_ids, {skip_special_tokens: true})[0] || '';
+    }
+  } catch {}
+  try {
+    if (typeof processor.decode === 'function' && inputs?.input_ids?.[0]) {
+      return processor.decode(inputs.input_ids[0], {skip_special_tokens: true}) || '';
+    }
+  } catch {}
+  return '';
+}
+
+function extractGemmaOutputText(processor, outputIds, inputs, formattedPrompt) {
+  const inputLen = getInputTokenLength(inputs);
+  try {
+    if (typeof outputIds?.slice === 'function' && inputLen) {
+      const generatedTokens = outputIds.slice(null, [inputLen, null]);
+      const generated = processor.batch_decode(generatedTokens, {skip_special_tokens: true})[0] || '';
+      const trimmed = generated.trim().split('\n')[0].trim();
+      if (trimmed) return trimmed;
+    }
+  } catch {}
+
+  try {
+    const fullDecoded  = processor.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
+    const inputDecoded = decodeInputText(processor, inputs);
+    const afterPrompt  = inputDecoded ? fullDecoded.slice(inputDecoded.length).trim() : fullDecoded.replace(formattedPrompt, '').trim();
+    const firstLine    = afterPrompt.split('\n')[0].trim();
+    if (firstLine) return firstLine;
+    const idx = Math.max(fullDecoded.lastIndexOf('보정:'), fullDecoded.lastIndexOf('보정결과만:'));
+    if (idx >= 0) return fullDecoded.slice(idx).replace(/보정[결과만]*:/, '').trim().split('\n')[0].trim();
+    return fullDecoded.trim().split('\n').slice(-1)[0].trim();
+  } catch {
+    return '';
+  }
+}
 </script>
 </body>
 </html>
