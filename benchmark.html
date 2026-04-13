@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>감귤조사 - Gemma 벤치마크</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{--bg:#10140f;--sf:#172018;--sf2:#223126;--bd:#344a38;--ac:#ff9d2e;--gn:#21b56b;--rd:#e34848;--bl:#4f8df7;--tx:#f4f7f1;--txd:#b8c3b1;--txm:#7b8977;--pu:#a855f7}
+  body{font-family:'Noto Sans KR',-apple-system,sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding:16px;max-width:720px;margin:0 auto}
+  h1{font-size:20px;font-weight:900;color:var(--ac);margin-bottom:4px}
+  .sub{font-size:12px;color:var(--txd);margin-bottom:16px}
+  .panel{background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:12px}
+  .panel h2{font-size:13px;color:var(--txm);font-weight:700;margin-bottom:10px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--txm);font-weight:700;flex:1;min-width:140px}
+  select,input{width:100%;border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;padding:9px}
+  .btn{padding:11px 16px;border:1px solid var(--bd);border-radius:8px;background:var(--sf);color:var(--txd);font-size:13px;font-family:inherit;font-weight:900;cursor:pointer}
+  .btn.primary{background:var(--ac);color:#111;border-color:var(--ac)}
+  .btn.disabled{opacity:.4;pointer-events:none}
+  .prog-wrap{margin-top:8px}
+  .prog-bar{height:5px;background:var(--sf2);border-radius:3px;overflow:hidden}
+  .prog-fill{height:100%;background:var(--ac);border-radius:3px;transition:width .3s;width:0%}
+  .log{background:var(--sf2);border-radius:8px;padding:10px;font-size:11px;color:var(--txd);line-height:1.6;max-height:120px;overflow-y:auto;margin-top:8px;white-space:pre-wrap;word-break:break-all}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{background:var(--sf2);color:var(--txm);font-weight:700;padding:7px 8px;text-align:left;border-bottom:1px solid var(--bd)}
+  td{padding:7px 8px;border-bottom:1px solid var(--sf2);vertical-align:top}
+  tr.pass td:last-child{color:var(--gn);font-weight:700}
+  tr.fail td:last-child{color:var(--rd);font-weight:700}
+  tr.running td{color:var(--ac)}
+  .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+  .scard{background:var(--sf2);border-radius:8px;padding:10px;text-align:center}
+  .scard b{display:block;font-size:20px;font-weight:900;color:var(--ac)}
+  .scard span{display:block;font-size:10px;color:var(--txm);margin-top:2px}
+  .device-info{font-size:11px;color:var(--txd);line-height:1.7}
+  .badge{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700}
+  .badge.pass{background:var(--gn);color:#000}
+  .badge.fail{background:var(--rd);color:#fff}
+  .badge.pend{background:var(--txm);color:#000}
+</style>
+</head>
+<body>
+<h1>Gemma 벤치마크</h1>
+<p class="sub">감귤조사 음성인식 보정 모델 속도/정확도 측정 — iPhone 13 mini (A15) / Galaxy S20 (SD865)</p>
+
+<div class="panel">
+  <h2>설정</h2>
+  <div class="row">
+    <label>모델
+      <select id="modelSelect">
+        <option value="onnx-community/gemma-2b-it">Gemma 2B-IT (q4, ~1GB)</option>
+        <option value="onnx-community/gemma-2b-it-ONNX">Gemma 2B-IT ONNX (q8)</option>
+      </select>
+    </label>
+    <label>디바이스
+      <select id="deviceSelect">
+        <option value="wasm">WASM (호환성 우선)</option>
+        <option value="webgpu">WebGPU (GPU 가속)</option>
+      </select>
+    </label>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn primary" id="btnLoad" onclick="window.loadBenchModel()">모델 로드</button>
+    <button class="btn disabled" id="btnRun" onclick="window.runBenchmark()">벤치마크 실행</button>
+    <button class="btn disabled" id="btnExport" onclick="window.exportResults()">JSON 내보내기</button>
+  </div>
+  <div class="prog-wrap">
+    <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
+    <div class="log" id="logBox">모델을 로드한 후 벤치마크를 실행하세요.</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>디바이스 정보</h2>
+  <div class="device-info" id="deviceInfo">로딩 중...</div>
+</div>
+
+<div class="panel">
+  <h2>테스트 케이스</h2>
+  <table id="testTable">
+    <thead>
+      <tr><th>#</th><th>입력</th><th>기대</th><th>출력</th><th>시간(ms)</th><th>결과</th></tr>
+    </thead>
+    <tbody id="testBody"></tbody>
+  </table>
+  <div class="summary" id="summary" style="display:none">
+    <div class="scard"><b id="sumAcc">-</b><span>정확도</span></div>
+    <div class="scard"><b id="sumAvg">-</b><span>평균 ms</span></div>
+    <div class="scard"><b id="sumMin">-</b><span>최소 ms</span></div>
+    <div class="scard"><b id="sumMax">-</b><span>최대 ms</span></div>
+  </div>
+</div>
+
+<script type="module">
+const TEST_CASES = [
+  {input: '변경 22.5',   expected: '횡경 22.5'},
+  {input: '존경 35.7',   expected: '종경 35.7'},
+  {input: '은경 85.5',   expected: '횡경 85.5'},
+  {input: '거실 삼',     expected: '과실 3'},
+  {input: '행경 91.2',   expected: '횡경 91.2'},
+  {input: '나무 일',     expected: '나무 1'},
+  {input: '엔경 122.4',  expected: '횡경 122.4'},
+  {input: '마실 사',     expected: '과실 4'},
+  {input: '동경 39.9',   expected: '종경 39.9'},
+  {input: '과피 2.5',    expected: '과피 2.5'},
+];
+
+const FIELDS_LIST = ['조사나무','조사과실','횡경','종경','과중','당도','산도','착색','경도','과피두께','비타민C','구연산','과즙량','씨수','비고'];
+const DICT = '변경=횡경,존경=종경,거실=과실,행경=횡경,은경=횡경,엔경=횡경,마실=과실,동경=종경,바실=과실,아실=과실,나무=조사나무,과피=과피두께';
+
+let benchTokenizer = null;
+let benchModel     = null;
+let benchResults   = [];
+let loadMs         = 0;
+
+// Show device info
+function getGPUInfo() {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) return null;
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    return {
+      vendor:   ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)   : null,
+      renderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null,
+    };
+  } catch { return null; }
+}
+
+function renderDeviceInfo() {
+  const gpu = getGPUInfo();
+  const el  = document.getElementById('deviceInfo');
+  const rows = [
+    ['User Agent',      navigator.userAgent],
+    ['Platform',        navigator.platform],
+    ['CPU Cores',       navigator.hardwareConcurrency || '?'],
+    ['Device Memory',   (navigator.deviceMemory ? navigator.deviceMemory + ' GB' : '?')],
+    ['Screen',          `${screen.width}×${screen.height} @${window.devicePixelRatio}x`],
+    ['GPU Vendor',      gpu?.vendor || '?'],
+    ['GPU Renderer',    gpu?.renderer || '?'],
+    ['Connection',      navigator.connection?.effectiveType || '?'],
+    ['iOS',             /iPad|iPhone|iPod/.test(navigator.userAgent) ? 'Yes' : 'No'],
+    ['Android',         /Android/.test(navigator.userAgent) ? 'Yes' : 'No'],
+  ];
+  el.innerHTML = rows.map(([k, v]) => `<b style="color:var(--txm)">${k}:</b> ${String(v)}`).join('<br>');
+}
+renderDeviceInfo();
+
+// Init table
+function initTable() {
+  const tbody = document.getElementById('testBody');
+  tbody.innerHTML = TEST_CASES.map((tc, i) =>
+    `<tr id="row-${i}"><td>${i+1}</td><td>${escHtml(tc.input)}</td><td>${escHtml(tc.expected)}</td><td id="out-${i}">-</td><td id="ms-${i}">-</td><td id="res-${i}"><span class="badge pend">대기</span></td></tr>`
+  ).join('');
+}
+initTable();
+
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function log(msg) {
+  const box = document.getElementById('logBox');
+  box.textContent += '\n' + msg;
+  box.scrollTop = box.scrollHeight;
+}
+
+window.loadBenchModel = async function() {
+  const modelId = document.getElementById('modelSelect').value;
+  const device  = document.getElementById('deviceSelect').value;
+  const btn     = document.getElementById('btnLoad');
+  const fill    = document.getElementById('progFill');
+  btn.classList.add('disabled');
+  btn.textContent = '로딩중...';
+  document.getElementById('logBox').textContent = `모델 로드 시작: ${modelId} (${device})`;
+
+  const t0 = performance.now();
+  try {
+    const {AutoTokenizer, AutoModelForCausalLM, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
+    env.allowLocalModels = false;
+    try { env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1)); } catch {}
+
+    const progressCb = (p) => {
+      if (p.status === 'progress' && p.total) {
+        const pct = Math.round(p.loaded / p.total * 100);
+        fill.style.width = pct + '%';
+        log(`  ${p.file || 'model'} ${pct}%`);
+      }
+      if (p.status === 'ready') fill.style.width = '100%';
+    };
+
+    log('AutoTokenizer 로드 중...');
+    benchTokenizer = await AutoTokenizer.from_pretrained(modelId, {progress_callback: progressCb});
+    log('AutoModelForCausalLM 로드 중...');
+    benchModel = await AutoModelForCausalLM.from_pretrained(modelId, {dtype: 'q4', device, progress_callback: progressCb});
+
+    loadMs = Math.round(performance.now() - t0);
+    log(`✓ 모델 로드 완료: ${loadMs}ms`);
+    btn.textContent = '재로드';
+    btn.classList.remove('disabled');
+    document.getElementById('btnRun').classList.remove('disabled');
+  } catch(e) {
+    log(`✗ 로드 실패: ${e.message}`);
+    btn.textContent = '재시도';
+    btn.classList.remove('disabled');
+  }
+};
+
+window.runBenchmark = async function() {
+  if (!benchTokenizer || !benchModel) { log('먼저 모델을 로드하세요'); return; }
+  document.getElementById('btnRun').classList.add('disabled');
+  benchResults = [];
+  const times = [];
+  let correct = 0;
+
+  document.getElementById('summary').style.display = 'none';
+  initTable();
+  log('\n--- 벤치마크 시작 ---');
+
+  for (let i = 0; i < TEST_CASES.length; i++) {
+    const tc  = TEST_CASES[i];
+    const row = document.getElementById(`row-${i}`);
+    row.className = 'running';
+    document.getElementById(`res-${i}`).innerHTML = '<span class="badge pend">실행중</span>';
+
+    const prompt = buildPrompt(tc.input);
+    const t0     = performance.now();
+    let output   = '';
+    let ok       = false;
+
+    try {
+      const inputs    = benchTokenizer(prompt, {return_tensors: 'pt'});
+      const outputIds = await benchModel.generate({...inputs, max_new_tokens: 12});
+      const decoded   = benchTokenizer.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
+      const markerIdx = decoded.lastIndexOf('출력:');
+      output          = (markerIdx >= 0 ? decoded.slice(markerIdx + 3) : decoded).trim().split('\n')[0].trim();
+    } catch(e) {
+      output = `ERROR: ${e.message}`;
+    }
+
+    const ms = Math.round(performance.now() - t0);
+    times.push(ms);
+    ok = normalizedMatch(output, tc.expected);
+    if (ok) correct++;
+
+    benchResults.push({input: tc.input, expected: tc.expected, output, ms, ok});
+
+    document.getElementById(`out-${i}`).textContent = output || '(없음)';
+    document.getElementById(`ms-${i}`).textContent  = ms;
+    document.getElementById(`res-${i}`).innerHTML   = ok ? '<span class="badge pass">PASS</span>' : '<span class="badge fail">FAIL</span>';
+    row.className = ok ? 'pass' : 'fail';
+    log(`#${i+1} "${tc.input}" → "${output}" (${ms}ms) ${ok ? 'PASS' : 'FAIL'}`);
+  }
+
+  const avg = Math.round(times.reduce((s, v) => s + v, 0) / times.length);
+  const min = Math.min(...times);
+  const max = Math.max(...times);
+  const acc = Math.round(correct / TEST_CASES.length * 100);
+
+  document.getElementById('sumAcc').textContent = acc + '%';
+  document.getElementById('sumAvg').textContent = avg + 'ms';
+  document.getElementById('sumMin').textContent = min + 'ms';
+  document.getElementById('sumMax').textContent = max + 'ms';
+  document.getElementById('summary').style.display = 'grid';
+
+  log(`\n=== 완료: 정확도 ${acc}% (${correct}/${TEST_CASES.length}), 평균 ${avg}ms, 최소 ${min}ms, 최대 ${max}ms ===`);
+  document.getElementById('btnRun').classList.remove('disabled');
+  document.getElementById('btnExport').classList.remove('disabled');
+};
+
+function buildPrompt(text) {
+  return `보정: ${FIELDS_LIST.join(',')}\n사전: ${DICT}\n입력: "${text}"\n출력:`;
+}
+
+function normalizedMatch(output, expected) {
+  if (!output) return false;
+  const norm = (s) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+  return norm(output).includes(norm(expected)) || norm(expected).includes(norm(output.split(' ').slice(0, 2).join(' ')));
+}
+
+window.exportResults = function() {
+  if (!benchResults.length) { alert('먼저 벤치마크를 실행하세요'); return; }
+  const gpu    = getGPUInfo();
+  const times  = benchResults.map(r => r.ms);
+  const data   = {
+    timestamp:    new Date().toISOString(),
+    modelId:      document.getElementById('modelSelect').value,
+    device:       document.getElementById('deviceSelect').value,
+    loadMs,
+    stats: {
+      accuracy:   Math.round(benchResults.filter(r => r.ok).length / benchResults.length * 100),
+      avgMs:      Math.round(times.reduce((s, v) => s + v, 0) / times.length),
+      minMs:      Math.min(...times),
+      maxMs:      Math.max(...times),
+      passed:     benchResults.filter(r => r.ok).length,
+      total:      benchResults.length,
+    },
+    cases: benchResults,
+    deviceInfo: {
+      userAgent:          navigator.userAgent,
+      platform:           navigator.platform,
+      hardwareConcurrency:navigator.hardwareConcurrency || null,
+      deviceMemory:       navigator.deviceMemory || null,
+      screenWidth:        screen.width,
+      screenHeight:       screen.height,
+      devicePixelRatio:   window.devicePixelRatio,
+      gpu,
+      connectionType:     navigator.connection?.effectiveType || null,
+      isIOS:              /iPad|iPhone|iPod/.test(navigator.userAgent),
+      isAndroid:          /Android/.test(navigator.userAgent),
+    },
+  };
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const blob  = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+  const url   = URL.createObjectURL(blob);
+  const a     = document.createElement('a');
+  a.href      = url;
+  a.download  = `gemma-benchmark-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+</script>
+</body>
+</html>

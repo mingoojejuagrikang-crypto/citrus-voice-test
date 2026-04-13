@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>감귤조사 v5 - 피드백 로그 음성인식</title>
+<title>감귤조사 v6 - 바지인 + Gemma 후처리</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -18,7 +18,7 @@
   .panel{background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:10px;margin-bottom:8px}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--txm);font-weight:700}
-  select,input{width:100%;border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;padding:9px}
+  select,input[type=text],input[type=number],input:not([type]){width:100%;border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;padding:9px}
   .model-status{padding:10px 12px;background:var(--sf);border:1px solid var(--bd);border-radius:8px;margin-bottom:8px;font-size:12px;color:var(--txd);line-height:1.45}
   .model-status.loading{border-color:var(--ac)}
   .model-status.ready{border-color:var(--gn)}
@@ -44,14 +44,16 @@
   .card.warn{border-left-color:var(--ac)}
   .card.fail{border-left-color:var(--rd)}
   .card.new{border-left-color:var(--bl)}
+  .card.gemma-corrected{border-left-color:#a855f7}
   @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   .card-raw{font-size:11px;color:var(--txm);margin-bottom:5px;line-height:1.45}
   .card-parsed{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
   .card-field{font-size:14px;font-weight:900;color:var(--ac)}
   .card-value{font-size:28px;font-weight:900}
   .card-meta{font-size:10px;color:var(--txm);margin-top:5px;line-height:1.45}
+  .badge-gemma{display:inline-block;background:#a855f7;color:#fff;font-size:9px;font-weight:900;padding:1px 5px;border-radius:4px;vertical-align:middle;margin-left:4px}
   .feedback{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
-  .mini{border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--txd);font-size:11px;font-family:inherit;font-weight:700;padding:6px 8px}
+  .mini{border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--txd);font-size:11px;font-family:inherit;font-weight:700;padding:6px 8px;cursor:pointer}
   .empty{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--txm);font-size:13px;line-height:1.8;padding:20px}
   .controls{position:fixed;bottom:0;left:0;right:0;background:var(--bg);border-top:1px solid var(--bd);padding:10px;display:flex;justify-content:center;gap:7px;max-width:520px;margin:0 auto;flex-wrap:wrap}
   .btn{padding:11px 12px;border:1px solid var(--bd);border-radius:8px;background:var(--sf);color:var(--txd);font-size:12px;font-family:inherit;font-weight:900;cursor:pointer;min-width:58px}
@@ -63,19 +65,21 @@
   .toast.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
   .toast .tf{color:var(--ac);font-size:14px}
   .toast .tv{font-size:30px;margin-top:2px}
+  .cf-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid var(--bd);font-size:11px;color:var(--txd)}
 </style>
 </head>
 <body>
 <div class="app">
   <div class="hdr">
-    <h1>감귤조사 v5</h1>
-    <div class="ver">전문용어 보정 + 피드백 로그 + 빠른/정확 모드</div>
+    <h1>감귤조사 v6</h1>
+    <div class="ver">바지인 + Gemma 후처리 + 사용자정의 항목 + 강화 로그</div>
   </div>
   <div class="panel">
     <div class="grid">
       <label>인식 엔진
         <select id="engineSelect" onchange="window.changeEngine(this.value)">
           <option value="webspeech">Web Speech 빠른 모드</option>
+          <option value="webspeech-gemma">Web Speech + Gemma 보정</option>
           <option value="whisper-tiny">Whisper tiny 비추천</option>
           <option value="whisper-base">Whisper base 비추천</option>
         </select>
@@ -87,6 +91,33 @@
         </select>
       </label>
     </div>
+    <div id="gemmaModelRow" style="margin-top:8px;display:none">
+      <label>Gemma 모델
+        <select id="gemmaModelSelect" onchange="window.changeGemmaModel(this.value)">
+          <option value="onnx-community/gemma-2b-it">Gemma 2B-IT (q4, ~1GB)</option>
+          <option value="onnx-community/gemma-2b-it-ONNX">Gemma 2B-IT ONNX (q8)</option>
+        </select>
+      </label>
+    </div>
+  </div>
+  <button class="btn" id="btnCustomToggle" onclick="window.toggleCustomPanel()" style="width:100%;margin-bottom:8px;font-size:11px">⚙ 항목 추가/관리</button>
+  <div class="panel" id="customPanel" style="display:none">
+    <div style="font-size:12px;color:var(--txm);font-weight:700;margin-bottom:8px">사용자 정의 항목 추가</div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:6px;margin-bottom:6px">
+      <input id="cfName" placeholder="항목명 (예: 엽록소)" type="text" style="font-size:12px">
+      <select id="cfType" style="font-size:12px">
+        <option value="float">소수</option>
+        <option value="int">정수</option>
+        <option value="text">텍스트</option>
+      </select>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
+      <input id="cfMin" placeholder="최소값" type="number" style="font-size:12px">
+      <input id="cfMax" placeholder="최대값" type="number" style="font-size:12px">
+      <input id="cfShort" placeholder="약칭" type="text" style="font-size:12px">
+    </div>
+    <button class="btn" onclick="window.addCustomField()" style="width:100%;margin-bottom:8px">항목 추가</button>
+    <div id="customFieldList" style="font-size:11px;color:var(--txd)">추가된 항목 없음</div>
   </div>
   <div class="model-status" id="modelStatus">
     iPhone Safari에서는 Web Speech 빠른 모드를 기본으로 사용하세요. Whisper는 비교용입니다.
@@ -108,12 +139,12 @@
       iPhone Safari 기본값은 Web Speech 빠른 모드입니다.<br>
       등록된 항목만 저장하고,<br>
       숫자만 다시 말하면 마지막 항목을 수정합니다.<br>
-      틀린 결과는 "틀림" 또는 "수정"으로 로그에 남겨주세요.
+      TTS 중에 말하면 즉시 중단하고 인식합니다 (바지인).
     </div>
   </div>
 </div>
 <div class="controls" id="controls">
-  <button class="btn" id="btnLoad" onclick="window.loadModel()">모델 로드</button>
+  <button class="btn" id="btnLoad" onclick="window.loadModel()" style="display:none">모델 로드</button>
   <button class="btn primary" id="btnStart" onclick="window.toggleCapture()">시작</button>
   <button class="btn" onclick="window.downloadLogs('json')">JSON</button>
   <button class="btn" onclick="window.downloadLogs('csv')">CSV</button>
@@ -121,115 +152,286 @@
 </div>
 <div class="toast" id="toast"><div class="tf" id="toastF"></div><div class="tv" id="toastV"></div></div>
 <script type="module">
-const APP_VERSION = 'v5.2.0-number-overwrite';
-const LOG_KEY = 'citrus_voice_feedback_logs_v5';
-const PREF_KEY = 'citrus_voice_prefs_v5';
+const APP_VERSION = 'v6.0.0';
+const LOG_KEY = 'citrus_voice_feedback_logs_v6';
+const PREF_KEY = 'citrus_voice_prefs_v6';
+const CUSTOM_FIELDS_KEY = 'citrus_custom_fields_v6';
+
+// Session identity
+const SESSION_ID = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'sess-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+const sessionStartedAt = new Date().toISOString();
+let totalRecognitionCount = 0;
+
+// Model configs
 const MODEL_CONFIGS = {
   'whisper-tiny': {label: 'Whisper tiny', modelId: 'onnx-community/whisper-tiny', dtype: 'q8'},
   'whisper-base': {label: 'Whisper base', modelId: 'onnx-community/whisper-base', dtype: 'q8'},
 };
+const GEMMA_DEFAULT_MODEL = 'onnx-community/gemma-2b-it';
+
 const VAD_MODES = {
-  fast: {label: '빠른 반응', silenceMs: 850, minMs: 350, maxMs: 5200, preRollMs: 420},
-  accurate: {label: '정확 우선', silenceMs: 1250, minMs: 450, maxMs: 7200, preRollMs: 620},
+  fast:    {label: '빠른 반응', silenceMs: 850,  minMs: 350, maxMs: 5200, preRollMs: 420},
+  accurate:{label: '정확 우선', silenceMs: 1250, minMs: 450, maxMs: 7200, preRollMs: 620},
 };
+
+// Fields with updated aliases (1-B)
 const FIELDS = {
-  '조사나무': {type: 'int', range: [1, 100], unit: '번', short: '나무', aliases: ['나무', '나무번호', '조사 나무', '노사 나무', '노사나무', '조사나 무', '좌사나무', '조산나무', '조사나무가', '조사나무는']},
-  '조사과실': {type: 'int', range: [1, 50], unit: '번', short: '과실', aliases: ['과실', '과실번호', '조사 과실', '조 과실', '조사과일', '좌사과실', '조산과실', '조사괴실', '조사 가실', '조사가 실', '조사 과제', '과일', '거실', '가실', '마실', '바실', '아실', '화실', '과시', '과 시', '마시']},
-  '횡경': {type: 'float', range: [10, 120], unit: 'mm', short: '횡', aliases: ['횡', '횡경이', '휑경', '휑경이', '행경', '황경', '왱경', '횡견', '횡겨', '횡격', '횡겸', '형경', '혈경', '흉경', '획경', '횟경', '변경', '생경', '엔', '엔경', '엔 경', '은경', '현경', '인경', '안경', '윤경', '행정']},
-  '종경': {type: 'float', range: [10, 120], unit: 'mm', short: '종', aliases: ['종', '종경이', '종견', '종겨', '종격', '종겸', '존경', '정경', '동경', '중경', '총경', '종교', '송경', '용경']},
-  '과중': {type: 'float', range: [30, 500], unit: 'g', short: null, aliases: ['과종', '과증', '과준', '괴중', '가중', '과충', '과중이', '무게']},
-  '당도': {type: 'float', range: [5, 20], unit: 'Brix', short: null, aliases: ['당두', '당돋', '단도', '당동', '당독', '당또', '당토', '담도', '브릭스']},
-  '산도': {type: 'float', range: [0.3, 3.0], unit: '%', short: null, aliases: ['산돋', '산동', '삼도', '선도', '산또', '잔도', '상도']},
-  '착색': {type: 'int', range: [1, 10], unit: '', short: null, aliases: ['착생', '착섹', '착쌕', '착색이', '칙색', '탁색']},
-  '경도': {type: 'float', range: [0.1, 30], unit: 'N', short: null, aliases: ['경돋', '견도', '겸도', '경독', '껑도', '격도']},
-  '과피두께': {type: 'float', range: [0.5, 10], unit: 'mm', short: '과피', aliases: ['과피', '과피두게', '과피두깨', '과피 두께', '꽈피두께', '과피 두게', '과피 두깨', '껍질두께', '피두께']},
-  '비타민C': {type: 'float', range: [10, 100], unit: 'mg', short: '비타민', aliases: ['비타민씨', '비타민시', '비타민 씨', '비타민', '비타민c', '피타민씨', '비타민 씨가']},
-  '구연산': {type: 'float', range: [0.1, 3.0], unit: '%', short: null, aliases: ['구연삼', '구년산', '구연산이', '귀연산', '구련산', '규연산']},
-  '과즙량': {type: 'float', range: [10, 200], unit: 'mL', short: '과즙', aliases: ['과즙', '과즙량이', '과증량', '과즙양', '과즙 양', '즙량']},
-  '씨수': {type: 'int', range: [0, 30], unit: '개', short: null, aliases: ['씨수가', '시수', '씨 수', '씨숫', '씨쑤', '씨앗수']},
-  '비고': {type: 'text', range: null, unit: '', short: null, aliases: ['비고란', '메모', '참고', '노트', '기타']},
+  '조사나무': {type:'int',   range:[1,100], unit:'번', short:'나무', aliases:['나무','나무번호','조사 나무','노사 나무','노사나무','조사나 무','좌사나무','조산나무','조사나무가','조사나무는']},
+  '조사과실': {type:'int',   range:[1,50],  unit:'번', short:'과실', aliases:['과실','과실번호','조사 과실','조 과실','조사과일','좌사과실','조산과실','조사괴실','조사 가실','조사가 실','조사 과제','과일','거실','가실','마실','바실','아실','화실','과시','과 시','마시','다시','마실사','바 실상','과 시로','마시로','가시도','다시 육','다시 일']},
+  '횡경':    {type:'float', range:[10,120], unit:'mm', short:'횡',  aliases:['횡','횡경이','휑경','휑경이','행경','황경','왱경','횡견','횡겨','횡격','횡겸','형경','혈경','흉경','획경','횟경','변경','생경','엔','엔경','엔 경','은경','현경','인경','안경','윤경','행정','빙빙경','경경','행 경','행 경대','행행경']},
+  '종경':    {type:'float', range:[10,120], unit:'mm', short:'종',  aliases:['종','종경이','종견','종겨','종격','종겸','존경','정경','동경','중경','총경','종교','송경','용경','존경 탐']},
+  '과중':    {type:'float', range:[30,500], unit:'g',  short:null,  aliases:['과종','과증','과준','괴중','가중','과충','과중이','무게']},
+  '당도':    {type:'float', range:[5,20],   unit:'Brix',short:null, aliases:['당두','당돋','단도','당동','당독','당또','당토','담도','브릭스']},
+  '산도':    {type:'float', range:[0.3,3.0],unit:'%',  short:null,  aliases:['산돋','산동','삼도','선도','산또','잔도','상도']},
+  '착색':    {type:'int',   range:[1,10],   unit:'',   short:null,  aliases:['착생','착섹','착쌕','착색이','칙색','탁색']},
+  '경도':    {type:'float', range:[0.1,30], unit:'N',  short:null,  aliases:['경돋','견도','겸도','경독','껑도','격도']},
+  '과피두께':{type:'float', range:[0.5,10], unit:'mm', short:'과피', aliases:['과피','과피두게','과피두깨','과피 두께','꽈피두께','과피 두게','과피 두깨','껍질두께','피두께']},
+  '비타민C': {type:'float', range:[10,100], unit:'mg', short:'비타민',aliases:['비타민씨','비타민시','비타민 씨','비타민','비타민c','피타민씨','비타민 씨가']},
+  '구연산':  {type:'float', range:[0.1,3.0],unit:'%',  short:null,  aliases:['구연삼','구년산','구연산이','귀연산','구련산','규연산']},
+  '과즙량':  {type:'float', range:[10,200], unit:'mL', short:'과즙', aliases:['과즙','과즙량이','과증량','과즙양','과즙 양','즙량']},
+  '씨수':    {type:'int',   range:[0,30],   unit:'개', short:null,  aliases:['씨수가','시수','씨 수','씨숫','씨쑤','씨앗수']},
+  '비고':    {type:'text',  range:null,     unit:'',   short:null,  aliases:['비고란','메모','참고','노트','기타']},
 };
+
 const KOREAN_DIGITS = {'영':0,'공':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'륙':6,'칠':7,'팔':8,'구':9,'하나':1,'둘':2,'셋':3,'넷':4,'다섯':5,'여섯':6,'일곱':7,'여덟':8,'아홉':9};
 const COUNTER_DIGITS = {...KOREAN_DIGITS, '다':4, '라':4, '로':5, '휠':1};
 const PARTICLE_RE = /(은|는|이|가|을|를|에|의|으로|로|하고|랑)$/;
 const UNIT_RE = /(밀리미터|미리미터|밀리|미리|mm|엠엠|브릭스|brix|퍼센트|프로|그램|그람|g|개|번|ml|미리리터)$/i;
+
+// State
 let prefs = loadPrefs();
-let engineMode = prefs.engineMode || 'webspeech';
-let vadMode = prefs.vadMode || 'fast';
-let transcriber = null;
-let modelLoaded = false;
+let engineMode   = prefs.engineMode   || 'webspeech';
+let vadMode      = prefs.vadMode      || 'fast';
+let gemmaModelId = prefs.gemmaModelId || GEMMA_DEFAULT_MODEL;
+
+// Whisper state
+let transcriber   = null;
+let modelLoaded   = false;
 let activeModelKey = null;
-let audioCtx = null;
-let capturing = false;
-let audioBuffer = [];
-let preRoll = [];
+
+// Gemma state
+let gemmaLoaded   = false;
+let gemmaLoading  = false;
+
+// Audio / VAD state
+let audioCtx      = null;
+let capturing     = false;
+let audioBuffer   = [];
+let preRoll       = [];
 let isVoiceActive = false;
 let silenceFrames = 0;
 let voiceStartedAt = 0;
-let noiseFloor = 0.006;
-let vadThreshold = 0.016;
+let noiseFloor    = 0.006;
+let vadThreshold  = 0.016;
 let processingQueue = [];
-let isProcessing = false;
-let recognition = null;
+let isProcessing  = false;
+let recognition   = null;
 let restartWebSpeech = false;
-let pendingField = null;
-let lastNumericTarget = null;
-let allResults = [];
-let feedbackLogs = loadLogs();
+
+// Recognition state
+let pendingField       = null;
+let lastNumericTarget  = null;
+let allResults         = [];
+let feedbackLogs       = loadLogs();
 let statOk = 0;
 let statFail = 0;
 let lastLatency = '-';
-let ttsBlockedUntil = 0;
+
+// TTS barge-in state (replaces ttsBlockedUntil)
+let lastTtsText = '';
+let lastTtsAt   = 0;
+
+// Custom fields
+let customFields = loadCustomFields();
+for (const [k, v] of Object.entries(customFields)) {
+  if (!Object.prototype.hasOwnProperty.call(FIELDS, k)) FIELDS[k] = v;
+}
+
+// Device info (computed once at startup)
+function getGPUInfo() {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) return null;
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    return {
+      vendor:   ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)   : null,
+      renderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null,
+    };
+  } catch { return null; }
+}
+
+const DEVICE_INFO = (() => {
+  try {
+    return {
+      userAgent:          navigator.userAgent,
+      platform:           navigator.platform,
+      deviceMemory:       navigator.deviceMemory || null,
+      hardwareConcurrency:navigator.hardwareConcurrency || null,
+      maxTouchPoints:     navigator.maxTouchPoints || null,
+      screenWidth:        screen.width,
+      screenHeight:       screen.height,
+      devicePixelRatio:   window.devicePixelRatio,
+      gpu:                getGPUInfo(),
+      connectionType:     navigator.connection?.effectiveType || null,
+      connectionDownlink: navigator.connection?.downlink || null,
+      isIOS:              /iPad|iPhone|iPod/.test(navigator.userAgent),
+      isAndroid:          /Android/.test(navigator.userAgent),
+      iOSVersion:         (navigator.userAgent.match(/OS (\d+_\d+)/) || [])[1] || null,
+      safariVersion:      (navigator.userAgent.match(/Version\/(\d+\.\d+)/) || [])[1] || null,
+      chromeVersion:      (navigator.userAgent.match(/Chrome\/(\d+)/) || [])[1] || null,
+    };
+  } catch { return {}; }
+})();
+
+function getSessionInfo() {
+  return {
+    sessionId:        SESSION_ID,
+    engineMode,
+    vadMode,
+    gemmaEnabled:     gemmaLoaded && engineMode === 'webspeech-gemma',
+    gemmaModelId:     (gemmaLoaded && engineMode === 'webspeech-gemma') ? gemmaModelId : null,
+    customFieldCount: Object.keys(customFields).length,
+    totalRecognitions:totalRecognitionCount,
+    sessionStartedAt,
+  };
+}
+
+// Init UI
 document.getElementById('engineSelect').value = engineMode;
-document.getElementById('modeSelect').value = vadMode;
+document.getElementById('modeSelect').value   = vadMode;
+const gms = document.getElementById('gemmaModelSelect');
+if (gms) {
+  // Set value only if option exists, otherwise keep default
+  if ([...gms.options].some(o => o.value === gemmaModelId)) gms.value = gemmaModelId;
+}
 syncControls();
 updateStats();
-function loadPrefs(){try{return JSON.parse(localStorage.getItem(PREF_KEY) || '{}')}catch{return {}}}
-function savePrefs(){localStorage.setItem(PREF_KEY, JSON.stringify({engineMode, vadMode}))}
-function loadLogs(){try{const parsed = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');return Array.isArray(parsed) ? parsed : []}catch{return []}}
-function persistLogs(){feedbackLogs = feedbackLogs.slice(-500);localStorage.setItem(LOG_KEY, JSON.stringify(feedbackLogs));updateStats()}
-function createId(){return crypto.randomUUID ? crypto.randomUUID() : 'log-' + Date.now() + '-' + Math.random().toString(16).slice(2)}
-function nowIso(){return new Date().toISOString()}
-function escapeHtml(value){return String(value ?? '').replace(/[&<>"']/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
-function setStatus(type, text){document.getElementById('dot').className = 'dot ' + type;document.getElementById('statusText').textContent = text}
-function updateStats(){document.getElementById('statOk').textContent = statOk;document.getElementById('statFail').textContent = statFail;document.getElementById('statLatency').textContent = lastLatency;document.getElementById('statLogs').textContent = feedbackLogs.length}
-function syncControls(){
-  const loadBtn = document.getElementById('btnLoad');
+renderCustomFieldList();
+
+// ---- Prefs / Storage ----
+function loadPrefs() {
+  try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}'); } catch { return {}; }
+}
+function savePrefs() {
+  localStorage.setItem(PREF_KEY, JSON.stringify({engineMode, vadMode, gemmaModelId}));
+}
+function loadLogs() {
+  try { const parsed = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+}
+function persistLogs() {
+  feedbackLogs = feedbackLogs.slice(-500);
+  localStorage.setItem(LOG_KEY, JSON.stringify(feedbackLogs));
+  updateStats();
+}
+function loadCustomFields() {
+  try { return JSON.parse(localStorage.getItem(CUSTOM_FIELDS_KEY) || '{}'); } catch { return {}; }
+}
+function saveCustomFields() {
+  localStorage.setItem(CUSTOM_FIELDS_KEY, JSON.stringify(customFields));
+}
+
+// ---- Utilities ----
+function createId() {
+  return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'log-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+}
+function nowIso() { return new Date().toISOString(); }
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function setStatus(type, text) {
+  document.getElementById('dot').className = 'dot ' + type;
+  document.getElementById('statusText').textContent = text;
+}
+function updateStats() {
+  document.getElementById('statOk').textContent      = statOk;
+  document.getElementById('statFail').textContent    = statFail;
+  document.getElementById('statLatency').textContent = lastLatency;
+  document.getElementById('statLogs').textContent    = feedbackLogs.length;
+}
+
+// ---- UI sync ----
+function syncControls() {
+  const loadBtn  = document.getElementById('btnLoad');
   const startBtn = document.getElementById('btnStart');
-  const status = document.getElementById('modelStatus');
-  const needsModel = engineMode.startsWith('whisper');
-  loadBtn.style.display = needsModel ? 'inline-block' : 'none';
-  startBtn.classList.toggle('disabled', needsModel && !(modelLoaded && activeModelKey === engineMode));
-  if (!needsModel) {
+  const status   = document.getElementById('modelStatus');
+  const gemmaRow = document.getElementById('gemmaModelRow');
+  const needsWhisper = engineMode.startsWith('whisper');
+  const needsGemma   = engineMode === 'webspeech-gemma';
+
+  gemmaRow.style.display = needsGemma ? 'block' : 'none';
+  loadBtn.style.display  = (needsWhisper || needsGemma) ? 'inline-block' : 'none';
+
+  if (!needsWhisper && !needsGemma) {
+    startBtn.classList.remove('disabled');
     status.className = 'model-status ready';
     status.innerHTML = 'iPhone Safari 기본값입니다. 숫자만 다시 말하면 마지막 항목을 수정합니다.<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>';
     setStatus('ok', 'Web Speech 시작 가능');
-  } else if (modelLoaded && activeModelKey === engineMode) {
-    const cfg = MODEL_CONFIGS[engineMode];
-    status.className = 'model-status ready';
-    status.innerHTML = `${cfg.label} 로드 완료. 시작할 수 있습니다.<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>`;
+  } else if (needsGemma) {
+    startBtn.classList.remove('disabled');
+    if (gemmaLoaded) {
+      loadBtn.textContent = 'Gemma 재로드';
+      status.className = 'model-status ready';
+      status.innerHTML = 'Gemma 보정 준비 완료. Web Speech + Gemma로 시작하세요.<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>';
+      setStatus('ok', 'Web Speech + Gemma 시작 가능');
+    } else {
+      loadBtn.textContent = 'Gemma 로드';
+      status.className = 'model-status';
+      status.innerHTML = 'Gemma 로드 없이도 Web Speech로 시작 가능합니다. 로드 후 보정 기능이 활성화됩니다.<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>';
+      setStatus('ok', 'Web Speech 시작 가능 (Gemma 미로드)');
+    }
   } else {
-    const cfg = MODEL_CONFIGS[engineMode];
-    status.className = 'model-status';
-    status.innerHTML = `${cfg.label} 모델을 먼저 로드하세요. 로드 후 짧은 warm-up을 수행합니다.<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
+    startBtn.classList.toggle('disabled', !(modelLoaded && activeModelKey === engineMode));
+    loadBtn.textContent = '모델 로드';
+    if (modelLoaded && activeModelKey === engineMode) {
+      const cfg = MODEL_CONFIGS[engineMode];
+      status.className = 'model-status ready';
+      status.innerHTML = `${cfg.label} 로드 완료. 시작할 수 있습니다.<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>`;
+    } else {
+      const cfg = MODEL_CONFIGS[engineMode];
+      status.className = 'model-status';
+      status.innerHTML = `${cfg.label} 모델을 먼저 로드하세요. 로드 후 짧은 warm-up을 수행합니다.<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
+    }
   }
 }
-window.changeEngine = function(next){if (capturing) stopCapture();engineMode = next;savePrefs();syncControls()};
-window.changeVadMode = function(next){vadMode = next;savePrefs();setStatus('ok', `${VAD_MODES[vadMode].label} 모드`)};
-window.loadModel = async function(){
+
+// ---- Engine controls ----
+window.changeEngine = function(next) {
+  if (capturing) stopCapture();
+  engineMode = next;
+  savePrefs();
+  syncControls();
+};
+window.changeVadMode = function(next) {
+  vadMode = next;
+  savePrefs();
+  setStatus('ok', `${VAD_MODES[vadMode].label} 모드`);
+};
+window.changeGemmaModel = function(next) {
+  gemmaModelId  = next;
+  gemmaLoaded   = false;
+  window._gemmaTokenizer = null;
+  window._gemmaModel     = null;
+  savePrefs();
+  syncControls();
+};
+
+// ---- Model load ----
+window.loadModel = async function() {
+  if (engineMode === 'webspeech-gemma') { await loadGemmaModel(); return; }
   if (!engineMode.startsWith('whisper')) return;
-  const cfg = MODEL_CONFIGS[engineMode];
-  const btn = document.getElementById('btnLoad');
+  const cfg    = MODEL_CONFIGS[engineMode];
+  const btn    = document.getElementById('btnLoad');
   const status = document.getElementById('modelStatus');
   btn.textContent = '로딩중';
   btn.classList.add('disabled');
   status.className = 'model-status loading';
   status.innerHTML = `${cfg.label} 다운로드/초기화 중입니다.<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
   const loadStarted = performance.now();
-  try{
+  try {
     const {pipeline, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
     env.allowLocalModels = false;
-    try{env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1))}catch{}
+    try { env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1)); } catch {}
     transcriber = await pipeline('automatic-speech-recognition', cfg.modelId, {
       dtype: cfg.dtype,
       device: 'wasm',
@@ -239,21 +441,21 @@ window.loadModel = async function(){
         if (p.status === 'progress' && p.total) {
           const pct = Math.round(p.loaded / p.total * 100);
           fill.style.width = pct + '%';
-          status.firstChild.textContent = `${cfg.label} ${p.file || 'model'} ${pct}%`;
+          if (status.firstChild) status.firstChild.textContent = `${cfg.label} ${p.file || 'model'} ${pct}%`;
         }
         if (p.status === 'ready') fill.style.width = '100%';
       },
     });
     setStatus('proc', 'warm-up 중');
     await transcriber(new Float32Array(16000), {language: 'korean', task: 'transcribe', chunk_length_s: 0});
-    modelLoaded = true;
+    modelLoaded    = true;
     activeModelKey = engineMode;
     btn.textContent = '모델 로드';
     btn.classList.remove('disabled');
     recordSystemLog('model-load', {engineMode, modelId: cfg.modelId, ms: Math.round(performance.now() - loadStarted)});
     syncControls();
     setStatus('ok', `${cfg.label} 준비 완료`);
-  }catch(e){
+  } catch(e) {
     btn.textContent = '재시도';
     btn.classList.remove('disabled');
     status.className = 'model-status error';
@@ -262,14 +464,113 @@ window.loadModel = async function(){
     setStatus('err', '모델 로드 실패');
   }
 };
-window.toggleCapture = async function(){
-  if (capturing) {stopCapture();return}
-  if (engineMode === 'webspeech') {startWebSpeech();return}
+
+async function loadGemmaModel() {
+  if (gemmaLoading) return;
+  gemmaLoading = true;
+  const btn    = document.getElementById('btnLoad');
+  const status = document.getElementById('modelStatus');
+  btn.textContent = '로딩중';
+  btn.classList.add('disabled');
+  status.className = 'model-status loading';
+  status.innerHTML = `Gemma 다운로드/초기화 중... (최초 로드 시 수 분 소요)<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
+  const loadStarted = performance.now();
+  try {
+    const {AutoTokenizer, AutoModelForCausalLM, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
+    env.allowLocalModels = false;
+    try { env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1)); } catch {}
+    const progressCb = (p) => {
+      const fill = document.getElementById('progFill');
+      if (!fill) return;
+      if (p.status === 'progress' && p.total) {
+        const pct = Math.round(p.loaded / p.total * 100);
+        fill.style.width = pct + '%';
+        if (status.firstChild) status.firstChild.textContent = `Gemma 로딩 ${p.file || ''} ${pct}%`;
+      }
+      if (p.status === 'ready') fill.style.width = '100%';
+    };
+    const [tokenizer, model] = await Promise.all([
+      AutoTokenizer.from_pretrained(gemmaModelId, {progress_callback: progressCb}),
+      AutoModelForCausalLM.from_pretrained(gemmaModelId, {dtype: 'q4', device: 'wasm', progress_callback: progressCb}),
+    ]);
+    window._gemmaTokenizer = tokenizer;
+    window._gemmaModel     = model;
+    gemmaLoaded  = true;
+    gemmaLoading = false;
+    btn.textContent = 'Gemma 재로드';
+    btn.classList.remove('disabled');
+    recordSystemLog('gemma-load', {modelId: gemmaModelId, ms: Math.round(performance.now() - loadStarted)});
+    syncControls();
+    setStatus('ok', 'Gemma 준비 완료');
+  } catch(e) {
+    gemmaLoading = false;
+    btn.textContent = 'Gemma 재시도';
+    btn.classList.remove('disabled');
+    status.className = 'model-status error';
+    status.innerHTML = `Gemma 로드 실패: ${escapeHtml(e.message)}<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
+    recordSystemLog('gemma-load-error', {modelId: gemmaModelId, error: e.message});
+    setStatus('err', 'Gemma 로드 실패');
+  }
+}
+
+// ---- Custom fields UI ----
+window.toggleCustomPanel = function() {
+  const p = document.getElementById('customPanel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+};
+window.addCustomField = function() {
+  const name  = (document.getElementById('cfName').value || '').trim();
+  const type  = document.getElementById('cfType').value;
+  const minV  = document.getElementById('cfMin').value;
+  const maxV  = document.getElementById('cfMax').value;
+  const short = (document.getElementById('cfShort').value || '').trim() || null;
+  if (!name) { alert('항목명을 입력하세요'); return; }
+  if (Object.prototype.hasOwnProperty.call(FIELDS, name)) { alert('이미 존재하는 항목입니다: ' + name); return; }
+  const range = (minV !== '' && maxV !== '') ? [Number(minV), Number(maxV)] : null;
+  const def   = {type, range, unit: '', short, aliases: short ? [short] : []};
+  customFields[name] = def;
+  FIELDS[name]       = def;
+  saveCustomFields();
+  renderCustomFieldList();
+  document.getElementById('cfName').value  = '';
+  document.getElementById('cfShort').value = '';
+  document.getElementById('cfMin').value   = '';
+  document.getElementById('cfMax').value   = '';
+  recordSystemLog('custom-field-added', {name, type, range, short});
+};
+window.removeCustomField = function(name) {
+  if (!customFields[name]) return;
+  delete customFields[name];
+  delete FIELDS[name];
+  saveCustomFields();
+  renderCustomFieldList();
+  recordSystemLog('custom-field-removed', {name});
+};
+function renderCustomFieldList() {
+  const list = document.getElementById('customFieldList');
+  if (!list) return;
+  const keys = Object.keys(customFields);
+  if (!keys.length) { list.textContent = '추가된 항목 없음'; return; }
+  list.innerHTML = keys.map(k =>
+    `<div class="cf-row"><span>${escapeHtml(k)} (${customFields[k].type}${customFields[k].short ? ', 약칭: ' + escapeHtml(customFields[k].short) : ''})</span><button class="mini" data-field="${escapeHtml(k)}" onclick="window.removeCustomField(this.dataset.field)">삭제</button></div>`
+  ).join('');
+}
+
+// ---- Capture control ----
+window.toggleCapture = async function() {
+  if (capturing) { stopCapture(); return; }
+  if (engineMode === 'webspeech' || engineMode === 'webspeech-gemma') { startWebSpeech(); return; }
   await startWhisperCapture();
 };
-function startWebSpeech(){
+
+// ---- Web Speech ----
+function startWebSpeech() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {setStatus('err', '이 브라우저는 Web Speech를 지원하지 않습니다');recordSystemLog('webspeech-unsupported', {userAgent: navigator.userAgent});return}
+  if (!SpeechRecognition) {
+    setStatus('err', '이 브라우저는 Web Speech를 지원하지 않습니다');
+    recordSystemLog('webspeech-unsupported', {userAgent: navigator.userAgent});
+    return;
+  }
   recognition = new SpeechRecognition();
   recognition.lang = 'ko-KR';
   recognition.continuous = true;
@@ -280,6 +581,7 @@ function startWebSpeech(){
   setStartButton(true);
   setStatus('listen', 'Web Speech 듣는 중');
   recordSystemLog('capture-start', {engineMode});
+
   recognition.onresult = (event) => {
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
@@ -287,76 +589,135 @@ function startWebSpeech(){
       const alternatives = [];
       for (let j = 0; j < result.length; j++) alternatives.push(result[j].transcript.trim());
       const text = alternatives[0] || '';
-      if (!text || Date.now() < ttsBlockedUntil) continue;
+      if (!text) continue;
+      // Barge-in: cancel TTS immediately when we receive a recognition result
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      // Echo prevention: skip if recognized text is too similar to recent TTS output
+      if (isEcho(text)) {
+        recordSystemLog('echo-filtered', {text, lastTtsText, msSinceTts: Date.now() - lastTtsAt});
+        continue;
+      }
       const start = performance.now();
       handleTranscript(text, {engine: 'webspeech', model: 'apple-or-browser-stt', alternatives, asrMs: Math.round(performance.now() - start), capture: {source: 'webspeech'}});
     }
   };
-  recognition.onerror = (e) => {setStatus('err', `Web Speech 오류: ${e.error}`);recordSystemLog('webspeech-error', {error: e.error, message: e.message})};
-  recognition.onend = () => {if (restartWebSpeech && capturing && engineMode === 'webspeech') setTimeout(() => {try{recognition?.start()}catch{}}, 80)};
-  try{recognition.start();speak('음성 입력 시작')}catch(e){capturing = false;setStartButton(false);setStatus('err', `시작 실패: ${e.message}`);recordSystemLog('webspeech-start-error', {error: e.message})}
+  recognition.onerror = (e) => {
+    setStatus('err', `Web Speech 오류: ${e.error}`);
+    recordSystemLog('webspeech-error', {error: e.error, message: e.message});
+  };
+  recognition.onend = () => {
+    if (restartWebSpeech && capturing && (engineMode === 'webspeech' || engineMode === 'webspeech-gemma')) {
+      setTimeout(() => { try { recognition?.start(); } catch {} }, 80);
+    }
+  };
+  try {
+    recognition.start();
+    speak('음성 입력 시작');
+  } catch(e) {
+    capturing = false;
+    setStartButton(false);
+    setStatus('err', `시작 실패: ${e.message}`);
+    recordSystemLog('webspeech-start-error', {error: e.message});
+  }
 }
-async function startWhisperCapture(){
-  if (!modelLoaded || activeModelKey !== engineMode || !transcriber) {alert('Whisper 모델을 먼저 로드하세요');return}
-  try{
+
+// Echo prevention helper
+function isEcho(text) {
+  if (!lastTtsText || Date.now() - lastTtsAt > 3000) return false;
+  const norm = (s) => s.toLowerCase().replace(/[,\s]/g, '');
+  return similarity(norm(text), norm(lastTtsText)) > 0.75;
+}
+
+// ---- Whisper capture ----
+async function startWhisperCapture() {
+  if (!modelLoaded || activeModelKey !== engineMode || !transcriber) {
+    alert('Whisper 모델을 먼저 로드하세요');
+    return;
+  }
+  try {
     const stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: false, channelCount: 1}});
     audioCtx = new (window.AudioContext || window.webkitAudioContext)({sampleRate: 16000});
     const actualRate = audioCtx.sampleRate;
-    const source = audioCtx.createMediaStreamSource(stream);
-    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    const source     = audioCtx.createMediaStreamSource(stream);
+    const processor  = audioCtx.createScriptProcessor(4096, 1, 1);
     source.connect(processor);
     processor.connect(audioCtx.destination);
-    capturing = true;
-    audioBuffer = [];
-    preRoll = [];
+    capturing     = true;
+    audioBuffer   = [];
+    preRoll       = [];
     isVoiceActive = false;
     silenceFrames = 0;
-    noiseFloor = 0.006;
-    vadThreshold = 0.016;
-    window._stream = stream;
+    noiseFloor    = 0.006;
+    vadThreshold  = 0.016;
+    window._stream    = stream;
     window._processor = processor;
-    window._source = source;
+    window._source    = source;
     setStartButton(true);
     setStatus('listen', 'Whisper 듣는 중');
     recordSystemLog('capture-start', {engineMode, vadMode, sampleRate: actualRate});
     speak('음성 입력 시작');
     processor.onaudioprocess = (e) => {
-      const input = e.inputBuffer.getChannelData(0);
-      const samples = new Float32Array(input);
+      const input    = e.inputBuffer.getChannelData(0);
+      const samples  = new Float32Array(input);
       const resampled = actualRate !== 16000 ? resample(samples, actualRate, 16000) : samples;
       const rms = calcRms(resampled);
       updateAdaptiveThreshold(rms);
       updateMeter(rms);
       consumeVadFrame(resampled, rms);
     };
-  }catch(e){setStatus('err', '마이크 권한을 허용해주세요');recordSystemLog('mic-error', {error: e.message})}
+  } catch(e) {
+    setStatus('err', '마이크 권한을 허용해주세요');
+    recordSystemLog('mic-error', {error: e.message});
+  }
 }
-function stopCapture(){
-  capturing = false;
+
+function stopCapture() {
+  capturing        = false;
   restartWebSpeech = false;
-  try{recognition?.stop()}catch{}
+  try { recognition?.stop(); } catch {}
   recognition = null;
-  try{window._processor?.disconnect();window._source?.disconnect();window._stream?.getTracks().forEach((track) => track.stop());audioCtx?.close()}catch{}
-  audioCtx = null;
+  try {
+    window._processor?.disconnect();
+    window._source?.disconnect();
+    window._stream?.getTracks().forEach((t) => t.stop());
+    audioCtx?.close();
+  } catch {}
+  audioCtx    = null;
   audioBuffer = [];
-  preRoll = [];
+  preRoll     = [];
   setStartButton(false);
   updateMeter(0);
   recordSystemLog('capture-stop', {engineMode});
   setStatus('ok', '중지됨');
   speak('음성 입력 종료');
 }
-function setStartButton(active){const btn = document.getElementById('btnStart');btn.textContent = active ? '중지' : '시작';btn.className = active ? 'btn stop' : 'btn primary'}
-function consumeVadFrame(frame, rms){
+
+function setStartButton(active) {
+  const btn = document.getElementById('btnStart');
+  btn.textContent = active ? '중지' : '시작';
+  btn.className   = active ? 'btn stop' : 'btn primary';
+}
+
+// ---- VAD ----
+function consumeVadFrame(frame, rms) {
   const settings = VAD_MODES[vadMode];
-  const frameMs = frame.length / 16000 * 1000;
+  const frameMs  = frame.length / 16000 * 1000;
   const silenceFrameLimit = Math.max(2, Math.round(settings.silenceMs / frameMs));
-  const minFrames = Math.max(1, Math.round(settings.minMs / frameMs));
-  const maxFrames = Math.max(minFrames + 2, Math.round(settings.maxMs / frameMs));
+  const minFrames  = Math.max(1, Math.round(settings.minMs / frameMs));
+  const maxFrames  = Math.max(minFrames + 2, Math.round(settings.maxMs / frameMs));
   const preRollFrames = Math.max(1, Math.round(settings.preRollMs / frameMs));
-  if (!isVoiceActive) {preRoll.push(new Float32Array(frame));while (preRoll.length > preRollFrames) preRoll.shift()}
+  if (!isVoiceActive) {
+    preRoll.push(new Float32Array(frame));
+    while (preRoll.length > preRollFrames) preRoll.shift();
+  }
   if (rms > vadThreshold) {
-    if (!isVoiceActive) {isVoiceActive = true;voiceStartedAt = performance.now();audioBuffer = preRoll.slice()}
+    if (!isVoiceActive) {
+      isVoiceActive  = true;
+      voiceStartedAt = performance.now();
+      audioBuffer    = preRoll.slice();
+      // Barge-in: cancel TTS when voice is detected
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    }
     silenceFrames = 0;
     audioBuffer.push(new Float32Array(frame));
   } else if (isVoiceActive) {
@@ -366,64 +727,150 @@ function consumeVadFrame(frame, rms){
   }
   if (isVoiceActive && audioBuffer.length >= maxFrames) flushVoiceClip('max-duration', minFrames);
 }
-function flushVoiceClip(reason, minFrames){
-  const frames = audioBuffer.length;
-  const clip = concatBuffers(audioBuffer);
+
+function flushVoiceClip(reason, minFrames) {
+  const frames  = audioBuffer.length;
+  const clip    = concatBuffers(audioBuffer);
   const capture = {reason, vadMode, frames, audioMs: Math.round(clip.length / 16000 * 1000), threshold: Number(vadThreshold.toFixed(5)), noiseFloor: Number(noiseFloor.toFixed(5)), queueDepth: processingQueue.length, voiceMs: Math.round(performance.now() - voiceStartedAt), rms: summarizeRms(clip)};
-  audioBuffer = [];
-  preRoll = [];
+  audioBuffer   = [];
+  preRoll       = [];
   isVoiceActive = false;
   silenceFrames = 0;
-  if (frames >= minFrames) enqueueClip(clip, capture); else recordSystemLog('clip-too-short', capture);
+  if (frames >= minFrames) enqueueClip(clip, capture);
+  else recordSystemLog('clip-too-short', capture);
 }
-function enqueueClip(audio, capture){
-  if (processingQueue.length >= 3) {const dropped = processingQueue.shift();recordSystemLog('queue-drop', {droppedAudioMs: dropped?.capture?.audioMs, queueDepth: processingQueue.length})}
+
+function enqueueClip(audio, capture) {
+  if (processingQueue.length >= 3) {
+    const dropped = processingQueue.shift();
+    recordSystemLog('queue-drop', {droppedAudioMs: dropped?.capture?.audioMs, queueDepth: processingQueue.length});
+  }
   processingQueue.push({audio, capture, queuedAt: performance.now()});
   if (!isProcessing) processNextClip();
 }
-async function processNextClip(){
-  if (processingQueue.length === 0) {isProcessing = false;if (capturing && engineMode.startsWith('whisper')) setStatus('listen', 'Whisper 듣는 중');return}
+
+async function processNextClip() {
+  if (processingQueue.length === 0) {
+    isProcessing = false;
+    if (capturing && engineMode.startsWith('whisper')) setStatus('listen', 'Whisper 듣는 중');
+    return;
+  }
   isProcessing = true;
-  const item = processingQueue.shift();
+  const item   = processingQueue.shift();
   setStatus('proc', 'Whisper 인식 중');
-  const cfg = MODEL_CONFIGS[engineMode];
+  const cfg     = MODEL_CONFIGS[engineMode];
   const started = performance.now();
-  try{
+  try {
     const output = await transcriber(item.audio, {language: 'korean', task: 'transcribe', chunk_length_s: 0});
-    const asrMs = Math.round(performance.now() - started);
-    const text = String(output?.text || '').trim();
-    if (text) handleTranscript(text, {engine: engineMode, model: cfg.modelId, asrMs, alternatives: [text], capture: {...item.capture, waitMs: Math.round(started - item.queuedAt)}});
-    else {recordRecognitionLog('(empty)', null, {engine: engineMode, model: cfg.modelId, asrMs, capture: item.capture, failure: 'EMPTY_TRANSCRIPT'});addCard({raw: '(무음 또는 인식 없음)', field: null, value: null, status: 'fail', message: 'Whisper 결과 없음'})}
-  }catch(e){
+    const asrMs  = Math.round(performance.now() - started);
+    const text   = String(output?.text || '').trim();
+    if (text) {
+      handleTranscript(text, {engine: engineMode, model: cfg.modelId, asrMs, alternatives: [text], capture: {...item.capture, waitMs: Math.round(started - item.queuedAt)}});
+    } else {
+      recordRecognitionLog('(empty)', null, {engine: engineMode, model: cfg.modelId, asrMs, capture: item.capture, failure: 'EMPTY_TRANSCRIPT'});
+      addCard({raw: '(무음 또는 인식 없음)', field: null, value: null, status: 'fail', message: 'Whisper 결과 없음'});
+    }
+  } catch(e) {
     recordRecognitionLog('(error)', null, {engine: engineMode, model: cfg.modelId, asrMs: Math.round(performance.now() - started), capture: item.capture, failure: e.message});
     addCard({raw: '(인식 오류)', field: null, value: null, status: 'fail', message: e.message});
   }
   processNextClip();
 }
-function resample(data, fromRate, toRate){const ratio = fromRate / toRate;const newLen = Math.max(1, Math.round(data.length / ratio));const result = new Float32Array(newLen);for (let i = 0; i < newLen; i++) {const srcIdx = i * ratio;const lo = Math.floor(srcIdx);const hi = Math.min(lo + 1, data.length - 1);const frac = srcIdx - lo;result[i] = data[lo] * (1 - frac) + data[hi] * frac}return result}
-function calcRms(data){let sum = 0;for (let i = 0; i < data.length; i++) sum += data[i] * data[i];return Math.sqrt(sum / data.length)}
-function summarizeRms(data){let sum = 0;let peak = 0;for (let i = 0; i < data.length; i++) {const abs = Math.abs(data[i]);sum += data[i] * data[i];if (abs > peak) peak = abs}return {avg: Number(Math.sqrt(sum / data.length).toFixed(5)), peak: Number(peak.toFixed(5))}}
-function updateAdaptiveThreshold(rms){if (!isVoiceActive && rms < Math.max(vadThreshold * 1.4, 0.04)) noiseFloor = noiseFloor * 0.96 + rms * 0.04;vadThreshold = Math.max(0.012, Math.min(0.06, noiseFloor * 2.8 + 0.006))}
-function updateMeter(rms){const pct = Math.min(rms * 520, 100);const fill = document.getElementById('meterFill');fill.style.width = pct + '%';fill.style.background = rms > vadThreshold ? 'var(--ac)' : 'var(--gn)'}
-function concatBuffers(bufs){const len = bufs.reduce((sum, buf) => sum + buf.length, 0);const out = new Float32Array(len);let offset = 0;for (const buf of bufs) {out.set(buf, offset);offset += buf.length}return out}
-function normalizeTranscript(text){return text.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[.,!?。、，]+$/g, '').replace(/\s+/g, ' ').trim()}
-function fieldKey(value){return String(value || '').toLowerCase().replace(/\s+/g, '').replace(/[.,!?。、，]/g, '').replace(UNIT_RE, '').replace(PARTICLE_RE, '')}
-function levenshtein(a, b){const m = a.length;const n = b.length;const d = Array.from({length: m + 1}, () => Array(n + 1).fill(0));for (let i = 0; i <= m; i++) d[i][0] = i;for (let j = 0; j <= n; j++) d[0][j] = j;for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) d[i][j] = a[i - 1] === b[j - 1] ? d[i - 1][j - 1] : 1 + Math.min(d[i - 1][j], d[i][j - 1], d[i - 1][j - 1]);return d[m][n]}
-function similarity(a, b){const max = Math.max(a.length, b.length);return max === 0 ? 1 : 1 - levenshtein(a, b) / max}
-function fieldAliases(field, meta){return [field, meta.short, ...(meta.aliases || [])].filter(Boolean)}
-function matchField(input){
-  const key = fieldKey(input);
-  let best = {field: input, score: 0, method: 'new', rawField: input, candidates: []};
+
+// ---- Audio utilities ----
+function resample(data, fromRate, toRate) {
+  const ratio  = fromRate / toRate;
+  const newLen = Math.max(1, Math.round(data.length / ratio));
+  const result = new Float32Array(newLen);
+  for (let i = 0; i < newLen; i++) {
+    const srcIdx = i * ratio;
+    const lo     = Math.floor(srcIdx);
+    const hi     = Math.min(lo + 1, data.length - 1);
+    const frac   = srcIdx - lo;
+    result[i]    = data[lo] * (1 - frac) + data[hi] * frac;
+  }
+  return result;
+}
+function calcRms(data) {
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+  return Math.sqrt(sum / data.length);
+}
+function summarizeRms(data) {
+  let sum = 0; let peak = 0;
+  for (let i = 0; i < data.length; i++) {
+    const abs = Math.abs(data[i]);
+    sum += data[i] * data[i];
+    if (abs > peak) peak = abs;
+  }
+  return {avg: Number(Math.sqrt(sum / data.length).toFixed(5)), peak: Number(peak.toFixed(5))};
+}
+function updateAdaptiveThreshold(rms) {
+  if (!isVoiceActive && rms < Math.max(vadThreshold * 1.4, 0.04)) noiseFloor = noiseFloor * 0.96 + rms * 0.04;
+  vadThreshold = Math.max(0.012, Math.min(0.06, noiseFloor * 2.8 + 0.006));
+}
+function updateMeter(rms) {
+  const pct  = Math.min(rms * 520, 100);
+  const fill = document.getElementById('meterFill');
+  fill.style.width      = pct + '%';
+  fill.style.background = rms > vadThreshold ? 'var(--ac)' : 'var(--gn)';
+}
+function concatBuffers(bufs) {
+  const len = bufs.reduce((s, b) => s + b.length, 0);
+  const out = new Float32Array(len);
+  let offset = 0;
+  for (const buf of bufs) { out.set(buf, offset); offset += buf.length; }
+  return out;
+}
+
+// ---- Text normalization & parsing ----
+function normalizeTranscript(text) {
+  return text
+    .replace(/[""]/g, '"').replace(/['']/g, "'")
+    .replace(/[.,!?。、，]+$/g, '')
+    .replace(/\s+/g, ' ').trim();
+}
+function fieldKey(value) {
+  return String(value || '').toLowerCase()
+    .replace(/\s+/g, '').replace(/[.,!?。、，]/g, '')
+    .replace(UNIT_RE, '').replace(PARTICLE_RE, '');
+}
+function levenshtein(a, b) {
+  const m = a.length; const n = b.length;
+  const d = Array.from({length: m + 1}, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) d[i][0] = i;
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+    d[i][j] = a[i-1] === b[j-1] ? d[i-1][j-1] : 1 + Math.min(d[i-1][j], d[i][j-1], d[i-1][j-1]);
+  return d[m][n];
+}
+function similarity(a, b) {
+  const max = Math.max(a.length, b.length);
+  return max === 0 ? 1 : 1 - levenshtein(a, b) / max;
+}
+function fieldAliases(field, meta) {
+  return [field, meta.short, ...(meta.aliases || [])].filter(Boolean);
+}
+function matchField(input) {
+  const key  = fieldKey(input);
+  let best   = {field: input, score: 0, method: 'new', rawField: input, candidates: []};
   const candidates = [];
   for (const [field, meta] of Object.entries(FIELDS)) {
     for (const alias of fieldAliases(field, meta)) {
       const aliasKey = fieldKey(alias);
-      let score = 0;
-      let method = 'fuzzy';
-      if (key === aliasKey) {score = alias === field ? 1 : 0.98;method = alias === field ? 'exact' : 'alias'}
-      else if (key.includes(aliasKey) && aliasKey.length >= 2) {score = Math.max(0.82, aliasKey.length / Math.max(key.length, aliasKey.length));method = 'contains-alias'}
-      else if (aliasKey.includes(key) && key.length >= 2) {score = Math.max(0.74, key.length / aliasKey.length - 0.04);method = 'prefix-alias'}
-      else score = similarity(key, aliasKey);
+      let score = 0; let method = 'fuzzy';
+      if (key === aliasKey) {
+        score  = alias === field ? 1 : 0.98;
+        method = alias === field ? 'exact' : 'alias';
+      } else if (key.includes(aliasKey) && aliasKey.length >= 2) {
+        score  = Math.max(0.82, aliasKey.length / Math.max(key.length, aliasKey.length));
+        method = 'contains-alias';
+      } else if (aliasKey.includes(key) && key.length >= 2) {
+        score  = Math.max(0.74, key.length / aliasKey.length - 0.04);
+        method = 'prefix-alias';
+      } else {
+        score = similarity(key, aliasKey);
+      }
       if (score >= 0.48) candidates.push({field, alias, score: Number(score.toFixed(4)), method});
       if (score > best.score) best = {field, score, method, rawField: input};
     }
@@ -432,7 +879,8 @@ function matchField(input){
   best.candidates = candidates.slice(0, 5);
   return best.score >= 0.55 ? best : {field: input, score: 0, method: 'new', rawField: input, candidates: candidates.slice(0, 5)};
 }
-function koreanWordToNumber(value){
+
+function koreanWordToNumber(value) {
   if (!value) return null;
   let text = String(value).trim().replace(/\s+/g, '').replace(UNIT_RE, '');
   text = text.replace(/쩜|점/g, '.').replace(/,/g, '.');
@@ -441,81 +889,98 @@ function koreanWordToNumber(value){
     const [left, right] = text.split('.');
     if (!left || !right) return null;
     const intValue = koreanInteger(left);
-    const decimal = koreanDecimal(right);
+    const decimal  = koreanDecimal(right);
     if (intValue !== null && decimal !== null) return Number(`${intValue}.${decimal}`);
     return null;
   }
   return koreanInteger(text);
 }
-function koreanInteger(text){
+function koreanInteger(text) {
   if (text === '') return null;
   if (/^\d+$/.test(text)) return Number(text);
   if (KOREAN_DIGITS[text] !== undefined) return KOREAN_DIGITS[text];
-  const units = {'십':10,'백':100,'천':1000};
-  let result = 0;
-  let current = 0;
-  let consumed = false;
+  const units  = {'십':10,'백':100,'천':1000};
+  let result   = 0; let current = 0; let consumed = false;
   for (const ch of text) {
-    if (KOREAN_DIGITS[ch] !== undefined) {current = KOREAN_DIGITS[ch];consumed = true}
-    else if (units[ch]) {result += (current || 1) * units[ch];current = 0;consumed = true}
+    if (KOREAN_DIGITS[ch] !== undefined) { current = KOREAN_DIGITS[ch]; consumed = true; }
+    else if (units[ch]) { result += (current || 1) * units[ch]; current = 0; consumed = true; }
     else return null;
   }
   result += current;
   return consumed ? result : null;
 }
-function koreanDecimal(text){if (text === '') return null;if (/^\d+$/.test(text)) return text;let out = '';for (const ch of text) {if (KOREAN_DIGITS[ch] === undefined) return null;out += KOREAN_DIGITS[ch]}return out}
-function expirePending(){if (pendingField && Date.now() - pendingField.setAt > 15000) pendingField = null}
-function parseUtterance(rawText){
+function koreanDecimal(text) {
+  if (text === '') return null;
+  if (/^\d+$/.test(text)) return text;
+  let out = '';
+  for (const ch of text) {
+    if (KOREAN_DIGITS[ch] === undefined) return null;
+    out += KOREAN_DIGITS[ch];
+  }
+  return out;
+}
+
+function expirePending() {
+  if (pendingField && Date.now() - pendingField.setAt > 15000) pendingField = null;
+}
+
+function parseUtterance(rawText) {
   expirePending();
   const text = normalizeTranscript(rawText);
   if (!text) return null;
   const candidates = [];
   const normalized = text.replace(/([0-9])\s+([0-9])/g, '$1$2');
+
   const memo = parseMemo(normalized, rawText);
   if (memo) return memo;
+
   const explicitCorrection = parseExplicitCorrection(normalized, rawText);
   if (explicitCorrection) return explicitCorrection;
+
   const arabic = normalized.match(/^(.+?)\s*([0-9]+(?:[.,][0-9]+)?)\s*(밀리미터|미리미터|밀리|미리|mm|브릭스|brix|퍼센트|프로|그램|그람|g|개|번|ml|미리리터)?$/i);
   if (arabic) {
     const match = matchField(arabic[1]);
     if (isRegisteredField(match.field)) candidates.push(makeCandidate(match, Number(arabic[2].replace(',', '.')), 'arabic-suffix'));
   }
+
   const words = normalized.split(/\s+/).filter(Boolean);
   for (let take = 1; take <= Math.min(4, words.length - 1); take++) {
     const numberText = words.slice(-take).join('');
     let value = koreanWordToNumber(numberText);
     if (value === null) continue;
     const fieldText = words.slice(0, -take).join(' ');
-    const match = matchField(fieldText);
+    const match     = matchField(fieldText);
     if (match.score >= 0.55 && isRegisteredField(match.field)) candidates.push(makeCandidate(match, value, 'korean-suffix'));
   }
+
   for (const word of words.slice(-1)) {
     if (COUNTER_DIGITS[word] === undefined) continue;
     const fieldText = words.slice(0, -1).join(' ');
-    const match = matchField(fieldText);
-    if (match.score >= 0.55 && isRegisteredField(match.field) && FIELDS[match.field].type === 'int') {
+    const match     = matchField(fieldText);
+    if (match.score >= 0.55 && isRegisteredField(match.field) && FIELDS[match.field].type === 'int')
       candidates.push(makeCandidate(match, COUNTER_DIGITS[word], 'counter-suffix'));
-    }
   }
+
   const compactRaw = normalized.toLowerCase().replace(/\s+/g, '').replace(/[.,!?。、，]/g, '').replace(UNIT_RE, '');
   const digitWords = Object.keys(COUNTER_DIGITS).sort((a, b) => b.length - a.length);
   for (const digitWord of digitWords) {
     if (!compactRaw.endsWith(digitWord) || compactRaw.length <= digitWord.length) continue;
     const fieldText = compactRaw.slice(0, -digitWord.length);
-    const match = matchField(fieldText);
-    if (match.score >= 0.55 && isRegisteredField(match.field) && FIELDS[match.field].type === 'int') {
+    const match     = matchField(fieldText);
+    if (match.score >= 0.55 && isRegisteredField(match.field) && FIELDS[match.field].type === 'int')
       candidates.push(makeCandidate(match, COUNTER_DIGITS[digitWord], 'attached-korean-digit'));
-    }
   }
+
   const compact = fieldKey(normalized);
   for (let cut = 1; cut <= Math.min(8, compact.length - 1); cut++) {
     const numberText = compact.slice(-cut);
-    const value = koreanWordToNumber(numberText);
+    const value      = koreanWordToNumber(numberText);
     if (value === null) continue;
-    const fieldText = compact.slice(0, -cut);
-    const match = matchField(fieldText);
+    const fieldText  = compact.slice(0, -cut);
+    const match      = matchField(fieldText);
     if (match.score >= 0.62 && isRegisteredField(match.field)) candidates.push(makeCandidate(match, value, 'compact-korean'));
   }
+
   const numOnly = koreanWordToNumber(normalized);
   if (numOnly !== null) {
     if (pendingField) {
@@ -527,6 +992,7 @@ function parseUtterance(rawText){
     if (overwrite) return overwrite;
     candidates.push({rawField: null, field: null, value: numOnly, matchScore: 0, matchMethod: 'number-only', candidates: []});
   }
+
   if (candidates.length === 0) {
     const match = matchField(normalized);
     if (match.score >= 0.62 && FIELDS[match.field]) {
@@ -535,21 +1001,25 @@ function parseUtterance(rawText){
     }
     return {rawText, normalizedText: normalized, rawField: normalized, field: null, value: null, matchScore: match.score, matchMethod: 'unmatched', candidates: match.candidates};
   }
+
   candidates.sort((a, b) => b.matchScore - a.matchScore);
   const best = candidates[0];
   if (best.field) pendingField = null;
   return {...best, rawText, normalizedText: normalized};
 }
-function isRegisteredField(field){return Object.prototype.hasOwnProperty.call(FIELDS, field)}
-function makeOverwriteResult(rawText, normalizedText, value){
+
+function isRegisteredField(field) {
+  return Object.prototype.hasOwnProperty.call(FIELDS, field);
+}
+function makeOverwriteResult(rawText, normalizedText, value) {
   if (!lastNumericTarget || Date.now() - lastNumericTarget.setAt >= 60000) return null;
   const field = lastNumericTarget.field;
   return {rawText, normalizedText, rawField: `[수정:${field}]`, field, value, matchScore: 0.94, matchMethod: 'overwrite-last-number', replacesLogId: lastNumericTarget.logId, candidates: [{field, score: 0.94, method: 'overwrite-last-number'}]};
 }
-function parseExplicitCorrection(normalized, rawText){
+function parseExplicitCorrection(normalized, rawText) {
   const match = normalized.match(/^(수정|정정)\s+(.+)$/);
   if (!match) return null;
-  const rest = match[2];
+  const rest  = match[2];
   const value = koreanWordToNumber(rest);
   if (value !== null) return makeOverwriteResult(rawText, normalized, value);
   const withField = rest.match(/^(.+?)\s*([0-9]+(?:[.,][0-9]+)?)\s*(밀리미터|미리미터|밀리|미리|mm|브릭스|brix|퍼센트|프로|그램|그람|g|개|번|ml|미리리터)?$/i);
@@ -559,61 +1029,188 @@ function parseExplicitCorrection(normalized, rawText){
   const replacingSameField = lastNumericTarget?.field === fieldMatch.field ? lastNumericTarget.logId : null;
   return {rawText, normalizedText: normalized, rawField: `[수정:${fieldMatch.field}]`, field: fieldMatch.field, value: Number(withField[2].replace(',', '.')), matchScore: fieldMatch.score, matchMethod: 'explicit-correction', replacesLogId: replacingSameField, candidates: fieldMatch.candidates};
 }
-function parseMemo(normalized, rawText){
+function parseMemo(normalized, rawText) {
   const aliases = fieldAliases('비고', FIELDS['비고']).sort((a, b) => b.length - a.length);
   for (const alias of aliases) {
-    const re = new RegExp('^' + alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s+(.+)$', 'i');
+    const re    = new RegExp('^' + alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s+(.+)$', 'i');
     const match = normalized.match(re);
     if (match) return {rawText, normalizedText: normalized, rawField: alias, field: '비고', value: match[1].trim(), matchScore: alias === '비고' ? 1 : 0.98, matchMethod: 'memo-text', candidates: [{field: '비고', alias, score: alias === '비고' ? 1 : 0.98, method: 'memo'}]};
   }
   return null;
 }
-function makeCandidate(match, value, method){return {rawField: match.rawField, field: match.field, value, matchScore: match.score, matchMethod: method + ':' + match.method, candidates: match.candidates}}
-function validateValue(field, value){const meta = FIELDS[field];if (!meta || !meta.range || value === null) return {valid: true};const [min, max] = meta.range;if (value < min || value > max) return {valid: false, warning: `범위 확인 필요 ${min}~${max}${meta.unit}`};if (meta.type === 'int' && !Number.isInteger(value)) return {valid: false, warning: '정수 항목입니다'};return {valid: true}}
-function handleTranscript(text, meta){
-  if (Date.now() < ttsBlockedUntil) return;
-  const started = performance.now();
-  const parsed = parseUtterance(text);
-  const parseMs = Math.round(performance.now() - started);
-  let status = 'ok';
-  let message = '';
-  if (!parsed || !parsed.field) {status = 'fail';message = parsed?.matchMethod === 'number-only' ? '항목 없이 숫자만 인식됨' : '파싱 실패';statFail++}
-  else if (parsed.matchMethod === 'pending-set') {status = 'warn';message = '값을 이어서 말씀하세요'}
-  else if (parsed.value !== null) {
+function makeCandidate(match, value, method) {
+  return {rawField: match.rawField, field: match.field, value, matchScore: match.score, matchMethod: method + ':' + match.method, candidates: match.candidates};
+}
+function validateValue(field, value) {
+  const meta = FIELDS[field];
+  if (!meta || !meta.range || value === null) return {valid: true};
+  const [min, max] = meta.range;
+  if (value < min || value > max) return {valid: false, warning: `범위 확인 필요 ${min}~${max}${meta.unit}`};
+  if (meta.type === 'int' && !Number.isInteger(value)) return {valid: false, warning: '정수 항목입니다'};
+  return {valid: true};
+}
+
+// ---- Handle transcript ----
+function handleTranscript(text, meta) {
+  totalRecognitionCount++;
+  const started  = performance.now();
+  const parsed   = parseUtterance(text);
+  const parseMs  = Math.round(performance.now() - started);
+  let status     = 'ok';
+  let message    = '';
+  if (!parsed || !parsed.field) {
+    status  = 'fail';
+    message = parsed?.matchMethod === 'number-only' ? '항목 없이 숫자만 인식됨' : '파싱 실패';
+    statFail++;
+  } else if (parsed.matchMethod === 'pending-set') {
+    status  = 'warn';
+    message = '값을 이어서 말씀하세요';
+  } else if (parsed.value !== null) {
     const validation = validateValue(parsed.field, parsed.value);
-    if (!validation.valid) {status = 'warn';message = validation.warning}
-    if (parsed.matchMethod === 'overwrite-last-number' || parsed.matchMethod === 'explicit-correction') message = `${parsed.field} 이전 값을 ${parsed.value}로 덮어씀`;
-    else if (parsed.matchScore < 0.8 && !parsed.matchMethod.startsWith('pending')) {status = 'warn';message = `"${parsed.rawField}" -> "${parsed.field}" 후보 ${Math.round(parsed.matchScore * 100)}%`}
+    if (!validation.valid) { status = 'warn'; message = validation.warning; }
+    if (parsed.matchMethod === 'overwrite-last-number' || parsed.matchMethod === 'explicit-correction') {
+      message = `${parsed.field} 이전 값을 ${parsed.value}로 덮어씀`;
+    } else if (parsed.matchScore < 0.8 && !parsed.matchMethod.startsWith('pending')) {
+      status  = 'warn';
+      message = `"${parsed.rawField}" -> "${parsed.field}" 후보 ${Math.round(parsed.matchScore * 100)}%`;
+    }
     statOk++;
   }
   const log = recordRecognitionLog(text, parsed, {...meta, parseMs, status, message});
-  if ((parsed?.matchMethod === 'overwrite-last-number' || parsed?.matchMethod === 'explicit-correction') && parsed.replacesLogId) markLogOverwritten(parsed.replacesLogId, log.id, parsed.value);
+  if ((parsed?.matchMethod === 'overwrite-last-number' || parsed?.matchMethod === 'explicit-correction') && parsed.replacesLogId) {
+    markLogOverwritten(parsed.replacesLogId, log.id, parsed.value);
+  }
   lastLatency = String((meta.asrMs || 0) + parseMs);
   updateStats();
   const entry = {raw: text, field: parsed?.field, value: parsed?.value, status, message, matchMethod: parsed?.matchMethod, matchScore: parsed?.matchScore, logId: log.id, replacesLogId: parsed?.replacesLogId};
   addCard(entry);
   if (parsed?.field && parsed.value !== null) {
     if (FIELDS[parsed.field]?.type !== 'text') lastNumericTarget = {field: parsed.field, logId: log.id, setAt: Date.now(), value: parsed.value};
-    try{navigator.vibrate(status === 'ok' ? [35] : [45, 35, 45])}catch{};
+    try { navigator.vibrate(status === 'ok' ? [35] : [45, 35, 45]); } catch {}
     const isOverwrite = parsed.matchMethod === 'overwrite-last-number' || parsed.matchMethod === 'explicit-correction';
     speak(isOverwrite ? `수정 ${parsed.field}, ${parsed.value}` : `${parsed.field}, ${parsed.value}`);
     showToast(isOverwrite ? `수정 ${parsed.field}` : parsed.field, parsed.value);
+    // Gemma async post-processing (non-blocking)
+    if (gemmaLoaded && engineMode === 'webspeech-gemma' && !isOverwrite) {
+      gemmaCorrectAsync(text, log.id, parsed).catch(() => {});
+    }
   }
 }
-function recordRecognitionLog(rawText, parsed, meta){
-  const log = {id: createId(), ts: nowIso(), appVersion: APP_VERSION, kind: 'recognition', engine: meta.engine || engineMode, model: meta.model || (MODEL_CONFIGS[engineMode]?.modelId || 'webspeech'), vadMode, rawText, alternatives: meta.alternatives || [], normalizedText: parsed?.normalizedText || '', parse: parsed ? {field: parsed.field, value: parsed.value, rawField: parsed.rawField, matchScore: parsed.matchScore, matchMethod: parsed.matchMethod, replacesLogId: parsed.replacesLogId || null, candidates: parsed.candidates || []} : null, status: meta.status || 'fail', message: meta.message || meta.failure || '', timing: {asrMs: meta.asrMs ?? null, parseMs: meta.parseMs ?? null}, capture: meta.capture || null, feedback: null, userAgent: navigator.userAgent};
+
+// ---- Gemma async correction ----
+async function gemmaCorrectAsync(rawText, logId, fuzzyParsed) {
+  const tokenizer = window._gemmaTokenizer;
+  const model     = window._gemmaModel;
+  if (!tokenizer || !model) return;
+  const prompt     = buildGemmaPrompt(rawText);
+  const gemmaStart = performance.now();
+  try {
+    const inputs    = tokenizer(prompt, {return_tensors: 'pt'});
+    const outputIds = await model.generate({
+      ...inputs,
+      max_new_tokens: 15,
+    });
+    const latencyMs = Math.round(performance.now() - gemmaStart);
+    const decoded   = tokenizer.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
+    // Extract text after "출력:" marker
+    const markerIdx = decoded.lastIndexOf('출력:');
+    const generated = (markerIdx >= 0 ? decoded.slice(markerIdx + 3) : decoded).trim().split('\n')[0].trim();
+    if (!generated) return;
+
+    const gemmaParsed = parseUtterance(generated);
+    const corrected   = !!(gemmaParsed?.field && gemmaParsed?.value !== null &&
+      (gemmaParsed.field !== fuzzyParsed?.field || gemmaParsed.value !== fuzzyParsed?.value));
+
+    // Update log entry with Gemma result
+    const logEntry = feedbackLogs.find(l => l.id === logId);
+    if (logEntry) {
+      logEntry.gemma = {inputText: rawText, outputText: generated, latencyMs, corrected, modelId: gemmaModelId};
+      persistLogs();
+    }
+
+    // Update card if Gemma produced a different result
+    if (corrected && gemmaParsed?.field && gemmaParsed?.value !== null) {
+      const area = document.getElementById('results');
+      const card = area.querySelector(`[data-log-id="${logId}"]`);
+      if (card) {
+        card.classList.add('gemma-corrected');
+        const parsedDiv = card.querySelector('.card-parsed');
+        if (parsedDiv) {
+          parsedDiv.innerHTML = `<span class="card-field">${escapeHtml(gemmaParsed.field)}</span><span class="card-value">${escapeHtml(String(gemmaParsed.value))}</span><span class="badge-gemma">Gemma</span>`;
+        }
+        const metaDivs = card.querySelectorAll('.card-meta');
+        const gemmaMetaText = `Gemma 보정: "${escapeHtml(fuzzyParsed?.field ?? '?')}" → "${escapeHtml(gemmaParsed.field)}" (${latencyMs}ms)`;
+        if (metaDivs.length > 0) {
+          metaDivs[0].innerHTML = gemmaMetaText;
+        } else {
+          const d = document.createElement('div');
+          d.className   = 'card-meta';
+          d.innerHTML   = gemmaMetaText;
+          card.appendChild(d);
+        }
+      }
+    }
+    recordSystemLog('gemma-correction', {logId, inputText: rawText, outputText: generated, corrected, latencyMs, modelId: gemmaModelId});
+  } catch(e) {
+    recordSystemLog('gemma-error', {logId, error: e.message, modelId: gemmaModelId});
+  }
+}
+
+function buildGemmaPrompt(text) {
+  const fieldList = Object.keys(FIELDS).join(',');
+  return `보정: ${fieldList}\n사전: 변경=횡경,존경=종경,거실=과실,행경=횡경,은경=횡경,엔경=횡경,마실=과실,동경=종경,바실=과실,아실=과실,다시=과실\n입력: "${text}"\n출력:`;
+}
+
+// ---- Logging ----
+function recordRecognitionLog(rawText, parsed, meta) {
+  const log = {
+    id:              createId(),
+    ts:              nowIso(),
+    appVersion:      APP_VERSION,
+    kind:            'recognition',
+    engine:          meta.engine || engineMode,
+    model:           meta.model  || (MODEL_CONFIGS[engineMode]?.modelId || 'webspeech'),
+    vadMode,
+    rawText,
+    alternatives:    meta.alternatives || [],
+    normalizedText:  parsed?.normalizedText || '',
+    parse:           parsed ? {field: parsed.field, value: parsed.value, rawField: parsed.rawField, matchScore: parsed.matchScore, matchMethod: parsed.matchMethod, replacesLogId: parsed.replacesLogId || null, candidates: parsed.candidates || []} : null,
+    status:          meta.status  || 'fail',
+    message:         meta.message || meta.failure || '',
+    timing:          {asrMs: meta.asrMs ?? null, parseMs: meta.parseMs ?? null},
+    capture:         meta.capture || null,
+    feedback:        null,
+    gemma:           null,
+    device:          DEVICE_INFO,
+    session:         getSessionInfo(),
+  };
   feedbackLogs.push(log);
   persistLogs();
   return log;
 }
-function markLogOverwritten(oldLogId, newLogId, newValue){
-  const oldLog = feedbackLogs.find((item) => item.id === oldLogId);
+function markLogOverwritten(oldLogId, newLogId, newValue) {
+  const oldLog = feedbackLogs.find(l => l.id === oldLogId);
   if (!oldLog) return;
   oldLog.feedback = {...(oldLog.feedback || {}), verdict: 'overwritten', replacedBy: newLogId, replacementValue: newValue, at: nowIso()};
   persistLogs();
 }
-function recordSystemLog(kind, detail){feedbackLogs.push({id: createId(), ts: nowIso(), appVersion: APP_VERSION, kind, engine: engineMode, vadMode, detail, userAgent: navigator.userAgent});persistLogs()}
-function addCard(entry){
+function recordSystemLog(kind, detail) {
+  feedbackLogs.push({
+    id:         createId(),
+    ts:         nowIso(),
+    appVersion: APP_VERSION,
+    kind,
+    engine:     engineMode,
+    vadMode,
+    detail,
+    device:     DEVICE_INFO,
+    session:    getSessionInfo(),
+  });
+  persistLogs();
+}
+
+// ---- Card UI ----
+function addCard(entry) {
   const empty = document.getElementById('empty');
   if (empty) empty.style.display = 'none';
   const area = document.getElementById('results');
@@ -621,22 +1218,32 @@ function addCard(entry){
     const oldCard = area.querySelector(`[data-log-id="${entry.replacesLogId}"]`);
     if (oldCard) oldCard.remove();
   }
-  const div = document.createElement('div');
-  div.className = 'card ' + (entry.status || '');
+  const div       = document.createElement('div');
+  div.className   = 'card ' + (entry.status || '');
   if (entry.logId) div.dataset.logId = entry.logId;
   let html = `<div class="card-raw">음성 "${escapeHtml(entry.raw)}"</div>`;
-  if (entry.field && entry.value !== null && entry.value !== undefined) html += `<div class="card-parsed"><span class="card-field">${escapeHtml(entry.field)}</span><span class="card-value">${escapeHtml(entry.value)}</span></div>`;
-  else if (entry.field) html += `<div class="card-parsed"><span class="card-field">${escapeHtml(entry.field)}</span><span class="card-value" style="font-size:14px;color:var(--txd)">값 대기중</span></div>`;
-  if (entry.message) html += `<div class="card-meta">${escapeHtml(entry.message)}</div>`;
+  if (entry.field && entry.value !== null && entry.value !== undefined) {
+    html += `<div class="card-parsed"><span class="card-field">${escapeHtml(entry.field)}</span><span class="card-value">${escapeHtml(entry.value)}</span></div>`;
+  } else if (entry.field) {
+    html += `<div class="card-parsed"><span class="card-field">${escapeHtml(entry.field)}</span><span class="card-value" style="font-size:14px;color:var(--txd)">값 대기중</span></div>`;
+  }
+  if (entry.message)     html += `<div class="card-meta">${escapeHtml(entry.message)}</div>`;
   if (entry.matchMethod) html += `<div class="card-meta">${escapeHtml(entry.matchMethod)} ${entry.matchScore ? Math.round(entry.matchScore * 100) + '%' : ''}</div>`;
-  if (entry.logId) html += `<div class="feedback"><button class="mini" onclick="window.markFeedback('${entry.logId}','ok')">맞음</button><button class="mini" onclick="window.markFeedback('${entry.logId}','bad')">틀림</button><button class="mini" onclick="window.correctLog('${entry.logId}')">수정</button></div>`;
+  if (entry.logId)       html += `<div class="feedback"><button class="mini" onclick="window.markFeedback('${entry.logId}','ok')">맞음</button><button class="mini" onclick="window.markFeedback('${entry.logId}','bad')">틀림</button><button class="mini" onclick="window.correctLog('${entry.logId}')">수정</button></div>`;
   div.innerHTML = html;
   area.insertBefore(div, area.firstChild);
   while (area.children.length > 60) area.removeChild(area.lastChild);
 }
-window.markFeedback = function(id, verdict){const log = feedbackLogs.find((item) => item.id === id);if (!log) return;log.feedback = {...(log.feedback || {}), verdict, at: nowIso()};persistLogs();setStatus('ok', verdict === 'ok' ? '맞음으로 기록됨' : '틀림으로 기록됨')};
-window.correctLog = function(id){
-  const log = feedbackLogs.find((item) => item.id === id);
+
+window.markFeedback = function(id, verdict) {
+  const log = feedbackLogs.find(l => l.id === id);
+  if (!log) return;
+  log.feedback = {...(log.feedback || {}), verdict, at: nowIso()};
+  persistLogs();
+  setStatus('ok', verdict === 'ok' ? '맞음으로 기록됨' : '틀림으로 기록됨');
+};
+window.correctLog = function(id) {
+  const log = feedbackLogs.find(l => l.id === id);
   if (!log) return;
   const answer = prompt('정답을 입력하세요. 예: 횡경 45.2 / 조사나무 3 / 과피두께 2.1', '');
   if (!answer) return;
@@ -645,42 +1252,66 @@ window.correctLog = function(id){
   persistLogs();
   setStatus('ok', '수정 정답이 로그에 저장됨');
 };
-function showToast(field, value){const toast = document.getElementById('toast');document.getElementById('toastF').textContent = field;document.getElementById('toastV').textContent = value;toast.classList.add('show');setTimeout(() => toast.classList.remove('show'), 1100)}
-function speak(text){
+
+// ---- Toast & TTS ----
+function showToast(field, value) {
+  const toast = document.getElementById('toast');
+  document.getElementById('toastF').textContent = field;
+  document.getElementById('toastV').textContent = value;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 1100);
+}
+
+function speak(text) {
   if (!('speechSynthesis' in window)) return;
-  ttsBlockedUntil = Date.now() + 800;
   window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = 'ko-KR';
-  utterance.rate = 1.32;
-  utterance.onend = () => {ttsBlockedUntil = Math.min(ttsBlockedUntil, Date.now() + 80)};
+  lastTtsText = text;
+  lastTtsAt   = Date.now();
+  const utterance  = new SpeechSynthesisUtterance(text);
+  utterance.lang   = 'ko-KR';
+  utterance.rate   = 1.32;
   window.speechSynthesis.speak(utterance);
 }
-window.clearResults = function(){
+
+// ---- Clear & Export ----
+window.clearResults = function() {
   if (capturing) stopCapture();
-  allResults = [];
-  pendingField = null;
+  allResults        = [];
+  pendingField      = null;
   lastNumericTarget = null;
-  statOk = 0;
-  statFail = 0;
-  lastLatency = '-';
+  statOk = 0; statFail = 0; lastLatency = '-';
   document.getElementById('results').innerHTML = '<div class="empty" id="empty">화면 결과만 초기화되었습니다.<br>피드백 로그는 JSON/CSV 버튼으로 내보낼 수 있습니다.</div>';
   updateStats();
   recordSystemLog('screen-clear', {});
 };
-window.downloadLogs = function(format){
-  if (!feedbackLogs.length) {alert('저장된 로그가 없습니다');return}
+window.downloadLogs = function(format) {
+  if (!feedbackLogs.length) { alert('저장된 로그가 없습니다'); return; }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  if (format === 'csv') {downloadBlob(`citrus-voice-feedback-${stamp}.csv`, logsToCsv(feedbackLogs), 'text/csv;charset=utf-8');return}
+  if (format === 'csv') { downloadBlob(`citrus-voice-feedback-${stamp}.csv`, logsToCsv(feedbackLogs), 'text/csv;charset=utf-8'); return; }
   downloadBlob(`citrus-voice-feedback-${stamp}.json`, JSON.stringify(feedbackLogs, null, 2), 'application/json;charset=utf-8');
 };
-function logsToCsv(logs){
+function logsToCsv(logs) {
   const rows = [['ts','kind','engine','model','rawText','field','value','score','method','status','message','asrMs','parseMs','audioMs','feedback','expectedText']];
-  for (const log of logs) rows.push([log.ts, log.kind, log.engine, log.model || '', log.rawText || '', log.parse?.field || '', log.parse?.value ?? '', log.parse?.matchScore ?? '', log.parse?.matchMethod || '', log.status || '', log.message || log.detail?.error || '', log.timing?.asrMs ?? '', log.timing?.parseMs ?? '', log.capture?.audioMs ?? '', log.feedback?.verdict || '', log.feedback?.expectedText || '']);
-  return rows.map((row) => row.map(csvCell).join(',')).join('\n');
+  for (const log of logs) {
+    rows.push([log.ts, log.kind, log.engine, log.model || '', log.rawText || '', log.parse?.field || '', log.parse?.value ?? '', log.parse?.matchScore ?? '', log.parse?.matchMethod || '', log.status || '', log.message || log.detail?.error || '', log.timing?.asrMs ?? '', log.timing?.parseMs ?? '', log.capture?.audioMs ?? '', log.feedback?.verdict || '', log.feedback?.expectedText || '']);
+  }
+  return rows.map(row => row.map(csvCell).join(',')).join('\n');
 }
-function csvCell(value){const text = String(value ?? '');return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text}
-function downloadBlob(filename, content, type){const blob = new Blob([content], {type});const url = URL.createObjectURL(blob);const a = document.createElement('a');a.href = url;a.download = filename;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url)}
+function csvCell(value) {
+  const text = String(value ?? '');
+  return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+function downloadBlob(filename, content, type) {
+  const blob = new Blob([content], {type});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 </script>
 </body>
 </html>
