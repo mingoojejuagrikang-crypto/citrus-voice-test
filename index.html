@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>감귤조사 v6 - 바지인 + Gemma 후처리</title>
+<title>감귤조사 v6.1 - Gemma 4 E2B + 바지인</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -69,17 +69,21 @@
 </style>
 </head>
 <body>
+<div id="criosWarning" style="display:none;background:#ef4444;color:#fff;text-align:center;padding:10px 14px;font-size:13px;font-weight:700;position:sticky;top:0;z-index:999;line-height:1.4">
+  ⚠️ Safari에서 열어주세요. iOS Chrome은 음성인식이 불안정합니다.<br>
+  <span style="font-size:11px;font-weight:400">Safari 앱 → 주소창에 같은 URL 입력</span>
+</div>
 <div class="app">
   <div class="hdr">
-    <h1>감귤조사 v6</h1>
-    <div class="ver">바지인 + Gemma 후처리 + 사용자정의 항목 + 강화 로그</div>
+    <h1>감귤조사 v6.1</h1>
+    <div class="ver">Gemma 4 E2B + 바지인 + 사용자정의 항목 + 강화 로그</div>
   </div>
   <div class="panel">
     <div class="grid">
       <label>인식 엔진
         <select id="engineSelect" onchange="window.changeEngine(this.value)">
           <option value="webspeech">Web Speech 빠른 모드</option>
-          <option value="webspeech-gemma">Web Speech + Gemma 보정</option>
+          <option value="webspeech-gemma">Web Speech + Gemma 4 보정</option>
           <option value="whisper-tiny">Whisper tiny 비추천</option>
           <option value="whisper-base">Whisper base 비추천</option>
         </select>
@@ -94,8 +98,8 @@
     <div id="gemmaModelRow" style="margin-top:8px;display:none">
       <label>Gemma 모델
         <select id="gemmaModelSelect" onchange="window.changeGemmaModel(this.value)">
-          <option value="onnx-community/gemma-2b-it">Gemma 2B-IT (q4, ~1GB)</option>
-          <option value="onnx-community/gemma-2b-it-ONNX">Gemma 2B-IT ONNX (q8)</option>
+          <option value="onnx-community/gemma-4-E2B-it-ONNX">Gemma 4 E2B (q4f16, ~500MB) ★</option>
+          <option value="onnx-community/gemma-4-E2B-it-ONNX-q8">Gemma 4 E2B (q8)</option>
         </select>
       </label>
     </div>
@@ -152,7 +156,7 @@
 </div>
 <div class="toast" id="toast"><div class="tf" id="toastF"></div><div class="tv" id="toastV"></div></div>
 <script type="module">
-const APP_VERSION = 'v6.0.0';
+const APP_VERSION = 'v6.1.0';
 const LOG_KEY = 'citrus_voice_feedback_logs_v6';
 const PREF_KEY = 'citrus_voice_prefs_v6';
 const CUSTOM_FIELDS_KEY = 'citrus_custom_fields_v6';
@@ -167,7 +171,7 @@ const MODEL_CONFIGS = {
   'whisper-tiny': {label: 'Whisper tiny', modelId: 'onnx-community/whisper-tiny', dtype: 'q8'},
   'whisper-base': {label: 'Whisper base', modelId: 'onnx-community/whisper-base', dtype: 'q8'},
 };
-const GEMMA_DEFAULT_MODEL = 'onnx-community/gemma-2b-it';
+const GEMMA_DEFAULT_MODEL = 'onnx-community/gemma-4-E2B-it-ONNX';
 
 const VAD_MODES = {
   fast:    {label: '빠른 반응', silenceMs: 850,  minMs: 350, maxMs: 5200, preRollMs: 420},
@@ -176,9 +180,9 @@ const VAD_MODES = {
 
 // Fields with updated aliases (1-B)
 const FIELDS = {
-  '조사나무': {type:'int',   range:[1,100], unit:'번', short:'나무', aliases:['나무','나무번호','조사 나무','노사 나무','노사나무','조사나 무','좌사나무','조산나무','조사나무가','조사나무는']},
-  '조사과실': {type:'int',   range:[1,50],  unit:'번', short:'과실', aliases:['과실','과실번호','조사 과실','조 과실','조사과일','좌사과실','조산과실','조사괴실','조사 가실','조사가 실','조사 과제','과일','거실','가실','마실','바실','아실','화실','과시','과 시','마시','다시','마실사','바 실상','과 시로','마시로','가시도','다시 육','다시 일']},
-  '횡경':    {type:'float', range:[10,120], unit:'mm', short:'횡',  aliases:['횡','횡경이','휑경','휑경이','행경','황경','왱경','횡견','횡겨','횡격','횡겸','형경','혈경','흉경','획경','횟경','변경','생경','엔','엔경','엔 경','은경','현경','인경','안경','윤경','행정','빙빙경','경경','행 경','행 경대','행행경']},
+  '조사나무': {type:'int',   range:[1,100], unit:'번', short:'나무', aliases:['나무','나무번호','조사 나무','노사 나무','노사나무','조사나 무','좌사나무','조산나무','조사나무가','조사나무는','나 무','나 보','나 귀']},
+  '조사과실': {type:'int',   range:[1,50],  unit:'번', short:'과실', aliases:['과실','과실번호','조사 과실','조 과실','조사과일','좌사과실','조산과실','조사괴실','조사 가실','조사가 실','조사 과제','과일','거실','가실','마실','바실','아실','화실','과시','과 시','마시','다시','마실사','바 실상','과 시로','마시로','가시도','다시 육','다시 일','바질','바지로','과이','화대']},
+  '횡경':    {type:'float', range:[10,120], unit:'mm', short:'횡',  aliases:['횡','횡경이','휑경','휑경이','행경','황경','왱경','횡견','횡겨','횡격','횡겸','형경','혈경','흉경','획경','횟경','변경','생경','엔','엔경','엔 경','은경','현경','인경','안경','윤경','행정','빙빙경','경경','행 경','행 경대','행행경','영 경','생 경']},
   '종경':    {type:'float', range:[10,120], unit:'mm', short:'종',  aliases:['종','종경이','종견','종겨','종격','종겸','존경','정경','동경','중경','총경','종교','송경','용경','존경 탐']},
   '과중':    {type:'float', range:[30,500], unit:'g',  short:null,  aliases:['과종','과증','과준','괴중','가중','과충','과중이','무게']},
   '당도':    {type:'float', range:[5,20],   unit:'Brix',short:null, aliases:['당두','당돋','단도','당동','당독','당또','당토','담도','브릭스']},
@@ -194,7 +198,20 @@ const FIELDS = {
 };
 
 const KOREAN_DIGITS = {'영':0,'공':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'륙':6,'칠':7,'팔':8,'구':9,'하나':1,'둘':2,'셋':3,'넷':4,'다섯':5,'여섯':6,'일곱':7,'여덟':8,'아홉':9};
-const COUNTER_DIGITS = {...KOREAN_DIGITS, '다':4, '라':4, '로':5, '휠':1};
+const COUNTER_DIGITS = {
+  ...KOREAN_DIGITS,
+  '다':4, '라':4, '로':5, '휠':1,
+  // Safari 오인식 보정 (v6.1)
+  '위':2,   // "이" 오인식
+  '고':5,   // "오" 오인식
+  '호':5,   // "오" 오인식
+  '무':2,   // "이" 오인식 (나무 이 → 나무 무)
+  '기':1,   // "일" 오인식
+  '길':1,   // "일" 오인식
+  '귀':1,   // "일" 오인식
+  '보':5,   // "오" 오인식
+  '무기':2, // 조사나무기 → 나무 2 패턴
+};
 const PARTICLE_RE = /(은|는|이|가|을|를|에|의|으로|로|하고|랑)$/;
 const UNIT_RE = /(밀리미터|미리미터|밀리|미리|mm|엠엠|브릭스|brix|퍼센트|프로|그램|그람|g|개|번|ml|미리리터)$/i;
 
@@ -296,6 +313,15 @@ function getSessionInfo() {
     sessionStartedAt,
   };
 }
+
+// CriOS 경고 배너 (iOS Chrome은 Web Speech 불안정)
+(function() {
+  const ua = navigator.userAgent;
+  if (/CriOS/.test(ua) && /iPhone|iPad/.test(ua)) {
+    const el = document.getElementById('criosWarning');
+    if (el) el.style.display = 'block';
+  }
+})();
 
 // Init UI
 document.getElementById('engineSelect').value = engineMode;
@@ -473,35 +499,51 @@ async function loadGemmaModel() {
   btn.textContent = '로딩중';
   btn.classList.add('disabled');
   status.className = 'model-status loading';
-  status.innerHTML = `Gemma 다운로드/초기화 중... (최초 로드 시 수 분 소요)<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
+  status.innerHTML = `Gemma 4 E2B 다운로드/초기화 중... (최초 ~500MB, 수 분 소요)<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
   const loadStarted = performance.now();
   try {
-    const {AutoTokenizer, AutoModelForCausalLM, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
+    const {AutoTokenizer, Gemma4ForConditionalGeneration, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
     env.allowLocalModels = false;
     try { env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1)); } catch {}
+
+    // WebGPU 지원 여부 확인 후 최적 디바이스 선택
+    let device = 'wasm';
+    let dtype  = 'q8';
+    try {
+      if ('gpu' in navigator) {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (adapter) { device = 'webgpu'; dtype = 'q4f16'; }
+      }
+    } catch {}
+
     const progressCb = (p) => {
       const fill = document.getElementById('progFill');
       if (!fill) return;
       if (p.status === 'progress' && p.total) {
         const pct = Math.round(p.loaded / p.total * 100);
         fill.style.width = pct + '%';
-        if (status.firstChild) status.firstChild.textContent = `Gemma 로딩 ${p.file || ''} ${pct}%`;
+        if (status.firstChild) status.firstChild.textContent = `Gemma 4 로딩 ${p.file || ''} ${pct}% (${device})`;
       }
       if (p.status === 'ready') fill.style.width = '100%';
     };
-    const [tokenizer, model] = await Promise.all([
-      AutoTokenizer.from_pretrained(gemmaModelId, {progress_callback: progressCb}),
-      AutoModelForCausalLM.from_pretrained(gemmaModelId, {dtype: 'q4', device: 'wasm', progress_callback: progressCb}),
-    ]);
-    window._gemmaTokenizer = tokenizer;
-    window._gemmaModel     = model;
+
+    const tokenizer = await AutoTokenizer.from_pretrained(gemmaModelId, {progress_callback: progressCb});
+    const model = await Gemma4ForConditionalGeneration.from_pretrained(gemmaModelId, {
+      dtype,
+      device,
+      progress_callback: progressCb,
+    });
+
+    window._gemmaTokenizer  = tokenizer;
+    window._gemmaModel      = model;
+    window._gemmaDevice     = device;
     gemmaLoaded  = true;
     gemmaLoading = false;
     btn.textContent = 'Gemma 재로드';
     btn.classList.remove('disabled');
-    recordSystemLog('gemma-load', {modelId: gemmaModelId, ms: Math.round(performance.now() - loadStarted)});
+    recordSystemLog('gemma-load', {modelId: gemmaModelId, device, dtype, ms: Math.round(performance.now() - loadStarted)});
     syncControls();
-    setStatus('ok', 'Gemma 준비 완료');
+    setStatus('ok', `Gemma 4 준비 완료 (${device})`);
   } catch(e) {
     gemmaLoading = false;
     btn.textContent = 'Gemma 재시도';
@@ -1102,19 +1144,48 @@ async function gemmaCorrectAsync(rawText, logId, fuzzyParsed) {
   const tokenizer = window._gemmaTokenizer;
   const model     = window._gemmaModel;
   if (!tokenizer || !model) return;
-  const prompt     = buildGemmaPrompt(rawText);
   const gemmaStart = performance.now();
   try {
-    const inputs    = tokenizer(prompt, {return_tensors: 'pt'});
+    // Build prompt using chat template if available
+    const promptText = buildGemmaPrompt(rawText);
+    let formattedPrompt = promptText;
+    try {
+      if (typeof tokenizer.apply_chat_template === 'function') {
+        formattedPrompt = tokenizer.apply_chat_template(
+          [{role: 'user', content: promptText}],
+          {tokenize: false, add_generation_prompt: true}
+        );
+      }
+    } catch {}
+
+    const inputs    = tokenizer(formattedPrompt, {return_tensors: 'pt'});
+    const inputLen  = inputs.input_ids.dims ? inputs.input_ids.dims[1] : inputs.input_ids[0].length;
     const outputIds = await model.generate({
       ...inputs,
-      max_new_tokens: 15,
+      max_new_tokens: 10,
+      temperature: 0.1,
+      do_sample: false,
     });
     const latencyMs = Math.round(performance.now() - gemmaStart);
-    const decoded   = tokenizer.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
-    // Extract text after "출력:" marker
-    const markerIdx = decoded.lastIndexOf('출력:');
-    const generated = (markerIdx >= 0 ? decoded.slice(markerIdx + 3) : decoded).trim().split('\n')[0].trim();
+
+    // Decode only newly generated tokens (after the prompt)
+    let generated = '';
+    try {
+      const fullDecoded   = tokenizer.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
+      const inputDecoded  = tokenizer.decode(inputs.input_ids[0], {skip_special_tokens: true}) || '';
+      const afterPrompt   = fullDecoded.slice(inputDecoded.length).trim();
+      generated = afterPrompt.split('\n')[0].trim();
+      // Fallback: look for 보정: or 출력: marker
+      if (!generated) {
+        const markerIdx = fullDecoded.lastIndexOf('보정:');
+        const markerIdx2 = fullDecoded.lastIndexOf('출력:');
+        const idx = Math.max(markerIdx, markerIdx2);
+        if (idx >= 0) generated = fullDecoded.slice(idx + 3).trim().split('\n')[0].trim();
+        else generated = fullDecoded.trim().split('\n').slice(-1)[0].trim();
+      }
+    } catch {
+      generated = '';
+    }
     if (!generated) return;
 
     const gemmaParsed = parseUtterance(generated);
@@ -1158,7 +1229,14 @@ async function gemmaCorrectAsync(rawText, logId, fuzzyParsed) {
 
 function buildGemmaPrompt(text) {
   const fieldList = Object.keys(FIELDS).join(',');
-  return `보정: ${fieldList}\n사전: 변경=횡경,존경=종경,거실=과실,행경=횡경,은경=횡경,엔경=횡경,마실=과실,동경=종경,바실=과실,아실=과실,다시=과실\n입력: "${text}"\n출력:`;
+  // Compact alias dict: top 2-3 per field to keep token count low
+  const dictPairs = [];
+  for (const [field, meta] of Object.entries(FIELDS)) {
+    for (const alias of (meta.aliases || []).slice(0, 2)) {
+      if (alias !== field) dictPairs.push(`${alias}=${field}`);
+    }
+  }
+  return `감귤조사 음성인식 보정.\n항목: ${fieldList}\n사전: ${dictPairs.join(',')}\n입력: "${text}"\n보정:`;
 }
 
 // ---- Logging ----

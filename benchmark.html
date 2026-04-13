@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<title>감귤조사 - Gemma 벤치마크</title>
+<title>감귤조사 - Gemma 4 E2B 벤치마크</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
@@ -42,7 +42,7 @@
 </style>
 </head>
 <body>
-<h1>Gemma 벤치마크</h1>
+<h1>Gemma 4 E2B 벤치마크</h1>
 <p class="sub">감귤조사 음성인식 보정 모델 속도/정확도 측정 — iPhone 13 mini (A15) / Galaxy S20 (SD865)</p>
 
 <div class="panel">
@@ -50,8 +50,8 @@
   <div class="row">
     <label>모델
       <select id="modelSelect">
-        <option value="onnx-community/gemma-2b-it">Gemma 2B-IT (q4, ~1GB)</option>
-        <option value="onnx-community/gemma-2b-it-ONNX">Gemma 2B-IT ONNX (q8)</option>
+        <option value="onnx-community/gemma-4-E2B-it-ONNX">Gemma 4 E2B (q4f16, ~500MB) ★</option>
+        <option value="onnx-community/gemma-4-E2B-it-ONNX-q8">Gemma 4 E2B (q8)</option>
       </select>
     </label>
     <label>디바이스
@@ -168,17 +168,27 @@ function log(msg) {
 }
 
 window.loadBenchModel = async function() {
-  const modelId = document.getElementById('modelSelect').value;
-  const device  = document.getElementById('deviceSelect').value;
-  const btn     = document.getElementById('btnLoad');
-  const fill    = document.getElementById('progFill');
+  const modelId     = document.getElementById('modelSelect').value;
+  let   device      = document.getElementById('deviceSelect').value;
+  const btn         = document.getElementById('btnLoad');
+  const fill        = document.getElementById('progFill');
   btn.classList.add('disabled');
   btn.textContent = '로딩중...';
-  document.getElementById('logBox').textContent = `모델 로드 시작: ${modelId} (${device})`;
+  document.getElementById('logBox').textContent = `모델 로드 시작: ${modelId}`;
+
+  // WebGPU 가용성 확인
+  if (device === 'webgpu') {
+    try {
+      const adapter = 'gpu' in navigator ? await navigator.gpu.requestAdapter() : null;
+      if (!adapter) { device = 'wasm'; log('WebGPU 미지원 → WASM 폴백'); }
+    } catch { device = 'wasm'; log('WebGPU 초기화 실패 → WASM 폴백'); }
+  }
+  const dtype = device === 'webgpu' ? 'q4f16' : 'q8';
+  log(`디바이스: ${device}, dtype: ${dtype}`);
 
   const t0 = performance.now();
   try {
-    const {AutoTokenizer, AutoModelForCausalLM, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
+    const {AutoTokenizer, Gemma4ForConditionalGeneration, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
     env.allowLocalModels = false;
     try { env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1)); } catch {}
 
@@ -193,8 +203,8 @@ window.loadBenchModel = async function() {
 
     log('AutoTokenizer 로드 중...');
     benchTokenizer = await AutoTokenizer.from_pretrained(modelId, {progress_callback: progressCb});
-    log('AutoModelForCausalLM 로드 중...');
-    benchModel = await AutoModelForCausalLM.from_pretrained(modelId, {dtype: 'q4', device, progress_callback: progressCb});
+    log('Gemma4ForConditionalGeneration 로드 중...');
+    benchModel = await Gemma4ForConditionalGeneration.from_pretrained(modelId, {dtype, device, progress_callback: progressCb});
 
     loadMs = Math.round(performance.now() - t0);
     log(`✓ 모델 로드 완료: ${loadMs}ms`);
@@ -231,11 +241,25 @@ window.runBenchmark = async function() {
     let ok       = false;
 
     try {
-      const inputs    = benchTokenizer(prompt, {return_tensors: 'pt'});
-      const outputIds = await benchModel.generate({...inputs, max_new_tokens: 12});
-      const decoded   = benchTokenizer.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
-      const markerIdx = decoded.lastIndexOf('출력:');
-      output          = (markerIdx >= 0 ? decoded.slice(markerIdx + 3) : decoded).trim().split('\n')[0].trim();
+      let formattedPrompt = prompt;
+      try {
+        if (typeof benchTokenizer.apply_chat_template === 'function') {
+          formattedPrompt = benchTokenizer.apply_chat_template(
+            [{role: 'user', content: prompt}],
+            {tokenize: false, add_generation_prompt: true}
+          );
+        }
+      } catch {}
+      const inputs    = benchTokenizer(formattedPrompt, {return_tensors: 'pt'});
+      const outputIds = await benchModel.generate({...inputs, max_new_tokens: 10, do_sample: false});
+      const fullDec   = benchTokenizer.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
+      const inputDec  = benchTokenizer.decode(inputs.input_ids[0], {skip_special_tokens: true}) || '';
+      const afterPr   = fullDec.slice(inputDec.length).trim();
+      output = afterPr.split('\n')[0].trim();
+      if (!output) {
+        const idx = Math.max(fullDec.lastIndexOf('보정:'), fullDec.lastIndexOf('출력:'));
+        output = idx >= 0 ? fullDec.slice(idx + 3).trim().split('\n')[0].trim() : fullDec.trim().split('\n').slice(-1)[0].trim();
+      }
     } catch(e) {
       output = `ERROR: ${e.message}`;
     }
