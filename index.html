@@ -98,8 +98,7 @@
     <div id="gemmaModelRow" style="margin-top:8px;display:none">
       <label>Gemma 모델
         <select id="gemmaModelSelect" onchange="window.changeGemmaModel(this.value)">
-          <option value="onnx-community/gemma-4-E2B-it-ONNX">Gemma 4 E2B (q4f16, ~500MB) ★</option>
-          <option value="onnx-community/gemma-4-E2B-it-ONNX-q8">Gemma 4 E2B (q8)</option>
+          <option value="onnx-community/gemma-4-E2B-it-ONNX">Gemma 4 E2B (~500MB, 자동 최적화)</option>
         </select>
       </label>
     </div>
@@ -436,7 +435,7 @@ window.changeVadMode = function(next) {
 window.changeGemmaModel = function(next) {
   gemmaModelId  = next;
   gemmaLoaded   = false;
-  window._gemmaTokenizer = null;
+  window._gemmaProcessor = null;
   window._gemmaModel     = null;
   savePrefs();
   syncControls();
@@ -502,7 +501,7 @@ async function loadGemmaModel() {
   status.innerHTML = `Gemma 4 E2B 다운로드/초기화 중... (최초 ~500MB, 수 분 소요)<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
   const loadStarted = performance.now();
   try {
-    const {AutoTokenizer, Gemma4ForConditionalGeneration, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
+    const {AutoProcessor, Gemma4ForConditionalGeneration, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
     env.allowLocalModels = false;
     try { env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1)); } catch {}
 
@@ -522,28 +521,30 @@ async function loadGemmaModel() {
       if (p.status === 'progress' && p.total) {
         const pct = Math.round(p.loaded / p.total * 100);
         fill.style.width = pct + '%';
-        if (status.firstChild) status.firstChild.textContent = `Gemma 4 로딩 ${p.file || ''} ${pct}% (${device})`;
+        const mb = (p.loaded / 1048576).toFixed(0);
+        if (status.firstChild) status.firstChild.textContent = `Gemma 4 로딩 ${p.file || ''} ${pct}% (${mb}MB, ${device})`;
       }
       if (p.status === 'ready') fill.style.width = '100%';
     };
 
-    const tokenizer = await AutoTokenizer.from_pretrained(gemmaModelId, {progress_callback: progressCb});
+    // AutoProcessor: tokenizer + preprocessing 통합 (텍스트 전용에도 사용 가능)
+    const processor = await AutoProcessor.from_pretrained(gemmaModelId, {progress_callback: progressCb});
     const model = await Gemma4ForConditionalGeneration.from_pretrained(gemmaModelId, {
       dtype,
       device,
       progress_callback: progressCb,
     });
 
-    window._gemmaTokenizer  = tokenizer;
-    window._gemmaModel      = model;
-    window._gemmaDevice     = device;
+    window._gemmaProcessor = processor;
+    window._gemmaModel     = model;
+    window._gemmaDevice    = device;
     gemmaLoaded  = true;
     gemmaLoading = false;
     btn.textContent = 'Gemma 재로드';
     btn.classList.remove('disabled');
     recordSystemLog('gemma-load', {modelId: gemmaModelId, device, dtype, ms: Math.round(performance.now() - loadStarted)});
     syncControls();
-    setStatus('ok', `Gemma 4 준비 완료 (${device})`);
+    setStatus('ok', `Gemma 4 준비 완료 (${device}, ${dtype})`);
   } catch(e) {
     gemmaLoading = false;
     btn.textContent = 'Gemma 재시도';
@@ -1141,46 +1142,54 @@ function handleTranscript(text, meta) {
 
 // ---- Gemma async correction ----
 async function gemmaCorrectAsync(rawText, logId, fuzzyParsed) {
-  const tokenizer = window._gemmaTokenizer;
+  const processor = window._gemmaProcessor;
   const model     = window._gemmaModel;
-  if (!tokenizer || !model) return;
+  if (!processor || !model) return;
   const gemmaStart = performance.now();
   try {
-    // Build prompt using chat template if available
     const promptText = buildGemmaPrompt(rawText);
+
+    // apply_chat_template: content 배열 형식 (Gemma 4 multimodal 스타일)
     let formattedPrompt = promptText;
     try {
-      if (typeof tokenizer.apply_chat_template === 'function') {
-        formattedPrompt = tokenizer.apply_chat_template(
-          [{role: 'user', content: promptText}],
+      if (typeof processor.apply_chat_template === 'function') {
+        formattedPrompt = processor.apply_chat_template(
+          [{role: 'user', content: [{type: 'text', text: promptText}]}],
           {tokenize: false, add_generation_prompt: true}
         );
       }
-    } catch {}
+    } catch {
+      // content 배열 미지원 시 문자열 형식 시도
+      try {
+        if (typeof processor.apply_chat_template === 'function') {
+          formattedPrompt = processor.apply_chat_template(
+            [{role: 'user', content: promptText}],
+            {tokenize: false, add_generation_prompt: true}
+          );
+        }
+      } catch {}
+    }
 
-    const inputs    = tokenizer(formattedPrompt, {return_tensors: 'pt'});
-    const inputLen  = inputs.input_ids.dims ? inputs.input_ids.dims[1] : inputs.input_ids[0].length;
+    const inputs    = processor(formattedPrompt, {return_tensors: 'pt'});
+    const inputLen  = inputs.input_ids.dims ? inputs.input_ids.dims[1] : (inputs.input_ids[0]?.length || 0);
     const outputIds = await model.generate({
       ...inputs,
       max_new_tokens: 10,
-      temperature: 0.1,
       do_sample: false,
     });
     const latencyMs = Math.round(performance.now() - gemmaStart);
 
-    // Decode only newly generated tokens (after the prompt)
+    // 생성된 토큰만 디코딩: 입력 길이 이후 부분
     let generated = '';
     try {
-      const fullDecoded   = tokenizer.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
-      const inputDecoded  = tokenizer.decode(inputs.input_ids[0], {skip_special_tokens: true}) || '';
-      const afterPrompt   = fullDecoded.slice(inputDecoded.length).trim();
+      const fullDecoded  = processor.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
+      const inputDecoded = processor.decode(inputs.input_ids[0], {skip_special_tokens: true}) || '';
+      const afterPrompt  = fullDecoded.slice(inputDecoded.length).trim();
       generated = afterPrompt.split('\n')[0].trim();
-      // Fallback: look for 보정: or 출력: marker
+      // 폴백: 마커 기반 추출
       if (!generated) {
-        const markerIdx = fullDecoded.lastIndexOf('보정:');
-        const markerIdx2 = fullDecoded.lastIndexOf('출력:');
-        const idx = Math.max(markerIdx, markerIdx2);
-        if (idx >= 0) generated = fullDecoded.slice(idx + 3).trim().split('\n')[0].trim();
+        const idx = Math.max(fullDecoded.lastIndexOf('보정:'), fullDecoded.lastIndexOf('보정결과만:'));
+        if (idx >= 0) generated = fullDecoded.slice(idx).replace(/보정[결과만]*:/, '').trim().split('\n')[0].trim();
         else generated = fullDecoded.trim().split('\n').slice(-1)[0].trim();
       }
     } catch {

@@ -50,8 +50,7 @@
   <div class="row">
     <label>모델
       <select id="modelSelect">
-        <option value="onnx-community/gemma-4-E2B-it-ONNX">Gemma 4 E2B (q4f16, ~500MB) ★</option>
-        <option value="onnx-community/gemma-4-E2B-it-ONNX-q8">Gemma 4 E2B (q8)</option>
+        <option value="onnx-community/gemma-4-E2B-it-ONNX">Gemma 4 E2B (~500MB, 자동 최적화)</option>
       </select>
     </label>
     <label>디바이스
@@ -188,7 +187,7 @@ window.loadBenchModel = async function() {
 
   const t0 = performance.now();
   try {
-    const {AutoTokenizer, Gemma4ForConditionalGeneration, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
+    const {AutoProcessor, Gemma4ForConditionalGeneration, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
     env.allowLocalModels = false;
     try { env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1)); } catch {}
 
@@ -201,8 +200,8 @@ window.loadBenchModel = async function() {
       if (p.status === 'ready') fill.style.width = '100%';
     };
 
-    log('AutoTokenizer 로드 중...');
-    benchTokenizer = await AutoTokenizer.from_pretrained(modelId, {progress_callback: progressCb});
+    log('AutoProcessor 로드 중...');
+    benchTokenizer = await AutoProcessor.from_pretrained(modelId, {progress_callback: progressCb});
     log('Gemma4ForConditionalGeneration 로드 중...');
     benchModel = await Gemma4ForConditionalGeneration.from_pretrained(modelId, {dtype, device, progress_callback: progressCb});
 
@@ -245,11 +244,20 @@ window.runBenchmark = async function() {
       try {
         if (typeof benchTokenizer.apply_chat_template === 'function') {
           formattedPrompt = benchTokenizer.apply_chat_template(
-            [{role: 'user', content: prompt}],
+            [{role: 'user', content: [{type: 'text', text: prompt}]}],
             {tokenize: false, add_generation_prompt: true}
           );
         }
-      } catch {}
+      } catch {
+        try {
+          if (typeof benchTokenizer.apply_chat_template === 'function') {
+            formattedPrompt = benchTokenizer.apply_chat_template(
+              [{role: 'user', content: prompt}],
+              {tokenize: false, add_generation_prompt: true}
+            );
+          }
+        } catch {}
+      }
       const inputs    = benchTokenizer(formattedPrompt, {return_tensors: 'pt'});
       const outputIds = await benchModel.generate({...inputs, max_new_tokens: 10, do_sample: false});
       const fullDec   = benchTokenizer.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
@@ -257,8 +265,9 @@ window.runBenchmark = async function() {
       const afterPr   = fullDec.slice(inputDec.length).trim();
       output = afterPr.split('\n')[0].trim();
       if (!output) {
-        const idx = Math.max(fullDec.lastIndexOf('보정:'), fullDec.lastIndexOf('출력:'));
-        output = idx >= 0 ? fullDec.slice(idx + 3).trim().split('\n')[0].trim() : fullDec.trim().split('\n').slice(-1)[0].trim();
+        const idx = Math.max(fullDec.lastIndexOf('보정:'), fullDec.lastIndexOf('보정결과만:'));
+        output = idx >= 0 ? fullDec.slice(idx).replace(/보정[결과만]*:/, '').trim().split('\n')[0].trim()
+                          : fullDec.trim().split('\n').slice(-1)[0].trim();
       }
     } catch(e) {
       output = `ERROR: ${e.message}`;
