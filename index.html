@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>감귤조사 v6.2 - Gemma 4 E2B + 바지인</title>
+<title>감귤조사 v6.3 - 현장 음성 파서</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -66,9 +66,19 @@
   .toast.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
   .toast .tf{color:var(--ac);font-size:14px}
   .toast .tv{font-size:30px;margin-top:2px}
-  .cf-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid var(--bd);font-size:11px;color:var(--txd)}
+  .cf-row{display:flex;justify-content:space-between;align-items:flex-start;padding:7px 0;border-top:1px solid var(--bd);font-size:11px;color:var(--txd);gap:8px}
+  .live-box{background:linear-gradient(180deg,#172018,#10180f);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  .live-head{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--txm);font-weight:900;letter-spacing:.04em;text-transform:uppercase}
+  .live-value{font-size:20px;font-weight:900;color:var(--tx);margin-top:6px;line-height:1.35;word-break:keep-all}
+  .live-meta{font-size:11px;color:var(--txd);margin-top:6px;line-height:1.45}
+  .live-box.interim{border-color:#526f57}
+  .live-box.final{border-color:var(--gn)}
+  .live-box.pending{border-color:var(--ac)}
+  .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+  .tiny{font-size:10px;color:var(--txm);line-height:1.5}
+  textarea{width:100%;border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;padding:9px;resize:vertical;min-height:66px}
 </style>
-  <script type="module" crossorigin src="./assets/main-ZKOc9MWM.js"></script>
+  <script type="module" crossorigin src="./assets/main-DHnLdaBg.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/gemma-loader-PXyAJwQf.js">
 </head>
 <body>
@@ -78,15 +88,15 @@
 </div>
 <div class="app">
   <div class="hdr">
-    <h1>감귤조사 v6.2</h1>
-    <div class="ver">Gemma 4 E2B 번들 로더 + 바지인 + 사용자정의 항목 + 강화 로그</div>
+    <h1>감귤조사 v6.3</h1>
+    <div class="ver">즉시 출력 + 붙여말하기 복구 + 비고 LLM 실험 + 사용자 정의 항목</div>
   </div>
   <div class="panel">
     <div class="grid">
       <label>인식 엔진
         <select id="engineSelect" onchange="window.changeEngine(this.value)">
           <option value="webspeech">Web Speech 빠른 모드</option>
-          <option value="webspeech-gemma">Web Speech + Gemma 4 보정</option>
+          <option value="webspeech-gemma">Web Speech + Gemma 비고 정리 실험</option>
           <option value="whisper-tiny">Whisper tiny 비추천</option>
           <option value="whisper-base">Whisper base 비추천</option>
         </select>
@@ -98,8 +108,20 @@
         </select>
       </label>
     </div>
+    <div class="grid" style="margin-top:8px">
+      <label>TTS 속도
+        <select id="ttsRateSelect" onchange="window.changeTtsRate(this.value)">
+          <option value="0.85">느리게 0.85</option>
+          <option value="0.95">보통 0.95</option>
+          <option value="1.05">빠르게 1.05</option>
+        </select>
+      </label>
+      <label>현장 메모
+        <div class="tiny" style="padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--sf2)">일반 항목은 규칙 기반, 비고만 LLM 정리</div>
+      </label>
+    </div>
     <div id="gemmaModelRow" style="margin-top:8px;display:none">
-      <label>Gemma 모델
+      <label>비고용 Gemma 모델
         <select id="gemmaModelSelect" onchange="window.changeGemmaModel(this.value)">
           <option value="gemma-4-e2b">Gemma 4 E2B (~500MB, 자동 최적화)</option>
         </select>
@@ -115,6 +137,7 @@
         <option value="float">소수</option>
         <option value="int">정수</option>
         <option value="text">텍스트</option>
+        <option value="enum">선택형</option>
       </select>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
@@ -122,6 +145,11 @@
       <input id="cfMax" placeholder="최대값" type="number" style="font-size:12px">
       <input id="cfShort" placeholder="약칭" type="text" style="font-size:12px">
     </div>
+    <div class="subgrid">
+      <input id="cfExample" placeholder="예시 발화 (예: 착색도 삼)" type="text" style="font-size:12px">
+      <input id="cfOptions" placeholder="선택형 옵션 (예: 상,중,하)" type="text" style="font-size:12px">
+    </div>
+    <textarea id="cfAliases" placeholder="추가 alias가 있으면 쉼표로 입력. 비워두면 규칙 기반 후보 자동 생성"></textarea>
     <button class="btn" onclick="window.addCustomField()" style="width:100%;margin-bottom:8px">항목 추가</button>
     <div id="customFieldList" style="font-size:11px;color:var(--txd)">추가된 항목 없음</div>
   </div>
@@ -134,6 +162,14 @@
     <div class="dot ok" id="dot"></div>
     <span id="statusText">시작 대기</span>
   </div>
+  <div class="live-box interim" id="liveBox">
+    <div class="live-head">
+      <span id="liveStage">INTERIM</span>
+      <span id="liveBadge">대기중</span>
+    </div>
+    <div class="live-value" id="liveText">말하는 도중 임시 텍스트가 여기 바로 보입니다.</div>
+    <div class="live-meta" id="liveMeta">확정 전에는 임시 텍스트, 확정 후에는 필드와 값이 표시됩니다.</div>
+  </div>
   <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
   <div class="stats">
     <div class="stat"><b id="statOk">0</b><span>성공</span></div>
@@ -144,8 +180,8 @@
   <div class="results" id="results">
     <div class="empty" id="empty">
       iPhone Safari 기본값은 Web Speech 빠른 모드입니다.<br>
-      등록된 항목만 저장하고,<br>
-      숫자만 다시 말하면 마지막 항목을 수정합니다.<br>
+      interim으로 먼저 보여주고 final에서 보정합니다.<br>
+      일반 항목은 규칙 기반, 비고만 LLM 정리 대상입니다.<br>
       TTS 중에 말하면 즉시 중단하고 인식합니다 (바지인).
     </div>
   </div>

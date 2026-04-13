@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>감귤조사 v6.2 - Gemma 4 E2B + 바지인</title>
+<title>감귤조사 v6.3 - 현장 음성 파서</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -66,7 +66,17 @@
   .toast.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
   .toast .tf{color:var(--ac);font-size:14px}
   .toast .tv{font-size:30px;margin-top:2px}
-  .cf-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid var(--bd);font-size:11px;color:var(--txd)}
+  .cf-row{display:flex;justify-content:space-between;align-items:flex-start;padding:7px 0;border-top:1px solid var(--bd);font-size:11px;color:var(--txd);gap:8px}
+  .live-box{background:linear-gradient(180deg,#172018,#10180f);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  .live-head{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--txm);font-weight:900;letter-spacing:.04em;text-transform:uppercase}
+  .live-value{font-size:20px;font-weight:900;color:var(--tx);margin-top:6px;line-height:1.35;word-break:keep-all}
+  .live-meta{font-size:11px;color:var(--txd);margin-top:6px;line-height:1.45}
+  .live-box.interim{border-color:#526f57}
+  .live-box.final{border-color:var(--gn)}
+  .live-box.pending{border-color:var(--ac)}
+  .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+  .tiny{font-size:10px;color:var(--txm);line-height:1.5}
+  textarea{width:100%;border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;padding:9px;resize:vertical;min-height:66px}
 </style>
 </head>
 <body>
@@ -76,15 +86,15 @@
 </div>
 <div class="app">
   <div class="hdr">
-    <h1>감귤조사 v6.2</h1>
-    <div class="ver">Gemma 4 E2B 번들 로더 + 바지인 + 사용자정의 항목 + 강화 로그</div>
+    <h1>감귤조사 v6.3</h1>
+    <div class="ver">즉시 출력 + 붙여말하기 복구 + 비고 LLM 실험 + 사용자 정의 항목</div>
   </div>
   <div class="panel">
     <div class="grid">
       <label>인식 엔진
         <select id="engineSelect" onchange="window.changeEngine(this.value)">
           <option value="webspeech">Web Speech 빠른 모드</option>
-          <option value="webspeech-gemma">Web Speech + Gemma 4 보정</option>
+          <option value="webspeech-gemma">Web Speech + Gemma 비고 정리 실험</option>
           <option value="whisper-tiny">Whisper tiny 비추천</option>
           <option value="whisper-base">Whisper base 비추천</option>
         </select>
@@ -96,8 +106,20 @@
         </select>
       </label>
     </div>
+    <div class="grid" style="margin-top:8px">
+      <label>TTS 속도
+        <select id="ttsRateSelect" onchange="window.changeTtsRate(this.value)">
+          <option value="0.85">느리게 0.85</option>
+          <option value="0.95">보통 0.95</option>
+          <option value="1.05">빠르게 1.05</option>
+        </select>
+      </label>
+      <label>현장 메모
+        <div class="tiny" style="padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--sf2)">일반 항목은 규칙 기반, 비고만 LLM 정리</div>
+      </label>
+    </div>
     <div id="gemmaModelRow" style="margin-top:8px;display:none">
-      <label>Gemma 모델
+      <label>비고용 Gemma 모델
         <select id="gemmaModelSelect" onchange="window.changeGemmaModel(this.value)">
           <option value="gemma-4-e2b">Gemma 4 E2B (~500MB, 자동 최적화)</option>
         </select>
@@ -113,6 +135,7 @@
         <option value="float">소수</option>
         <option value="int">정수</option>
         <option value="text">텍스트</option>
+        <option value="enum">선택형</option>
       </select>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
@@ -120,6 +143,11 @@
       <input id="cfMax" placeholder="최대값" type="number" style="font-size:12px">
       <input id="cfShort" placeholder="약칭" type="text" style="font-size:12px">
     </div>
+    <div class="subgrid">
+      <input id="cfExample" placeholder="예시 발화 (예: 착색도 삼)" type="text" style="font-size:12px">
+      <input id="cfOptions" placeholder="선택형 옵션 (예: 상,중,하)" type="text" style="font-size:12px">
+    </div>
+    <textarea id="cfAliases" placeholder="추가 alias가 있으면 쉼표로 입력. 비워두면 규칙 기반 후보 자동 생성"></textarea>
     <button class="btn" onclick="window.addCustomField()" style="width:100%;margin-bottom:8px">항목 추가</button>
     <div id="customFieldList" style="font-size:11px;color:var(--txd)">추가된 항목 없음</div>
   </div>
@@ -132,6 +160,14 @@
     <div class="dot ok" id="dot"></div>
     <span id="statusText">시작 대기</span>
   </div>
+  <div class="live-box interim" id="liveBox">
+    <div class="live-head">
+      <span id="liveStage">INTERIM</span>
+      <span id="liveBadge">대기중</span>
+    </div>
+    <div class="live-value" id="liveText">말하는 도중 임시 텍스트가 여기 바로 보입니다.</div>
+    <div class="live-meta" id="liveMeta">확정 전에는 임시 텍스트, 확정 후에는 필드와 값이 표시됩니다.</div>
+  </div>
   <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
   <div class="stats">
     <div class="stat"><b id="statOk">0</b><span>성공</span></div>
@@ -142,8 +178,8 @@
   <div class="results" id="results">
     <div class="empty" id="empty">
       iPhone Safari 기본값은 Web Speech 빠른 모드입니다.<br>
-      등록된 항목만 저장하고,<br>
-      숫자만 다시 말하면 마지막 항목을 수정합니다.<br>
+      interim으로 먼저 보여주고 final에서 보정합니다.<br>
+      일반 항목은 규칙 기반, 비고만 LLM 정리 대상입니다.<br>
       TTS 중에 말하면 즉시 중단하고 인식합니다 (바지인).
     </div>
   </div>
@@ -159,6 +195,11 @@
 <script type="module">
 import { pipeline } from '../src/lib/hf-runtime.js';
 import {
+  createFieldRegistry,
+  generateAliasSuggestions,
+  normalizeCustomFieldDefinition,
+} from '../src/lib/field-config.js';
+import {
   GEMMA_DEFAULT_MODEL_KEY,
   GEMMA_LOAD_STATES,
   detectWebGPU,
@@ -168,8 +209,9 @@ import {
   runGemmaTextCorrection,
   sanitizeGemmaModelKey,
 } from '../src/lib/gemma-loader.js';
+import { VoiceSurveyParser } from '../src/lib/parser.js';
 
-const APP_VERSION = 'v6.2.0';
+const APP_VERSION = 'v6.3.0';
 const LOG_KEY = 'citrus_voice_feedback_logs_v6';
 const PREF_KEY = 'citrus_voice_prefs_v6';
 const CUSTOM_FIELDS_KEY = 'citrus_custom_fields_v6';
@@ -185,10 +227,10 @@ const MODEL_CONFIGS = {
   'whisper-base': {label: 'Whisper base', modelId: 'onnx-community/whisper-base', dtype: 'q8'},
 };
 const GEMMA_ALIAS_HINTS = [
-  '변경=횡경', '행경=횡경', '은경=횡경', '엔경=횡경', '현경=횡경', '안경=횡경',
-  '존경=종경', '동경=종경', '정경=종경',
-  '거실=과실', '마실=과실', '바실=과실', '아실=과실',
-  '나무=조사나무', '과피=과피두께',
+  '변경=횡경', '행경=횡경', '은경=횡경', '엔경=횡경',
+  '존경=종경', '정경=종경', '동경=종경',
+  '거실=과실', '화실=과실', '과실로=과실 5',
+  '나무이=조사나무 2', '과실삼=조사과실 3',
 ];
 
 function getGemmaModelId(modelKey = gemmaModelKey) {
@@ -196,52 +238,16 @@ function getGemmaModelId(modelKey = gemmaModelKey) {
 }
 
 const VAD_MODES = {
-  fast:    {label: '빠른 반응', silenceMs: 850,  minMs: 350, maxMs: 5200, preRollMs: 420},
-  accurate:{label: '정확 우선', silenceMs: 1250, minMs: 450, maxMs: 7200, preRollMs: 620},
+  fast:    {label: '빠른 반응', silenceMs: 800,  minMs: 320, maxMs: 5200, preRollMs: 380},
+  accurate:{label: '정확 우선', silenceMs: 980, minMs: 420, maxMs: 7200, preRollMs: 560},
 };
-
-// Fields with updated aliases (1-B)
-const FIELDS = {
-  '조사나무': {type:'int',   range:[1,100], unit:'번', short:'나무', aliases:['나무','나무번호','조사 나무','노사 나무','노사나무','조사나 무','좌사나무','조산나무','조사나무가','조사나무는','나 무','나 보','나 귀']},
-  '조사과실': {type:'int',   range:[1,50],  unit:'번', short:'과실', aliases:['과실','과실번호','조사 과실','조 과실','조사과일','좌사과실','조산과실','조사괴실','조사 가실','조사가 실','조사 과제','과일','거실','가실','마실','바실','아실','화실','과시','과 시','마시','다시','마실사','바 실상','과 시로','마시로','가시도','다시 육','다시 일','바질','바지로','과이','화대']},
-  '횡경':    {type:'float', range:[10,120], unit:'mm', short:'횡',  aliases:['횡','횡경이','휑경','휑경이','행경','황경','왱경','횡견','횡겨','횡격','횡겸','형경','혈경','흉경','획경','횟경','변경','생경','엔','엔경','엔 경','은경','현경','인경','안경','윤경','행정','빙빙경','경경','행 경','행 경대','행행경','영 경','생 경']},
-  '종경':    {type:'float', range:[10,120], unit:'mm', short:'종',  aliases:['종','종경이','종견','종겨','종격','종겸','존경','정경','동경','중경','총경','종교','송경','용경','존경 탐']},
-  '과중':    {type:'float', range:[30,500], unit:'g',  short:null,  aliases:['과종','과증','과준','괴중','가중','과충','과중이','무게']},
-  '당도':    {type:'float', range:[5,20],   unit:'Brix',short:null, aliases:['당두','당돋','단도','당동','당독','당또','당토','담도','브릭스']},
-  '산도':    {type:'float', range:[0.3,3.0],unit:'%',  short:null,  aliases:['산돋','산동','삼도','선도','산또','잔도','상도']},
-  '착색':    {type:'int',   range:[1,10],   unit:'',   short:null,  aliases:['착생','착섹','착쌕','착색이','칙색','탁색']},
-  '경도':    {type:'float', range:[0.1,30], unit:'N',  short:null,  aliases:['경돋','견도','겸도','경독','껑도','격도']},
-  '과피두께':{type:'float', range:[0.5,10], unit:'mm', short:'과피', aliases:['과피','과피두게','과피두깨','과피 두께','꽈피두께','과피 두게','과피 두깨','껍질두께','피두께']},
-  '비타민C': {type:'float', range:[10,100], unit:'mg', short:'비타민',aliases:['비타민씨','비타민시','비타민 씨','비타민','비타민c','피타민씨','비타민 씨가']},
-  '구연산':  {type:'float', range:[0.1,3.0],unit:'%',  short:null,  aliases:['구연삼','구년산','구연산이','귀연산','구련산','규연산']},
-  '과즙량':  {type:'float', range:[10,200], unit:'mL', short:'과즙', aliases:['과즙','과즙량이','과증량','과즙양','과즙 양','즙량']},
-  '씨수':    {type:'int',   range:[0,30],   unit:'개', short:null,  aliases:['씨수가','시수','씨 수','씨숫','씨쑤','씨앗수']},
-  '비고':    {type:'text',  range:null,     unit:'',   short:null,  aliases:['비고란','메모','참고','노트','기타']},
-};
-
-const KOREAN_DIGITS = {'영':0,'공':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'륙':6,'칠':7,'팔':8,'구':9,'하나':1,'둘':2,'셋':3,'넷':4,'다섯':5,'여섯':6,'일곱':7,'여덟':8,'아홉':9};
-const COUNTER_DIGITS = {
-  ...KOREAN_DIGITS,
-  '다':4, '라':4, '로':5, '휠':1,
-  // Safari 오인식 보정 (v6.1)
-  '위':2,   // "이" 오인식
-  '고':5,   // "오" 오인식
-  '호':5,   // "오" 오인식
-  '무':2,   // "이" 오인식 (나무 이 → 나무 무)
-  '기':1,   // "일" 오인식
-  '길':1,   // "일" 오인식
-  '귀':1,   // "일" 오인식
-  '보':5,   // "오" 오인식
-  '무기':2, // 조사나무기 → 나무 2 패턴
-};
-const PARTICLE_RE = /(은|는|이|가|을|를|에|의|으로|로|하고|랑)$/;
-const UNIT_RE = /(밀리미터|미리미터|밀리|미리|mm|엠엠|브릭스|brix|퍼센트|프로|그램|그람|g|개|번|ml|미리리터)$/i;
 
 // State
 let prefs = loadPrefs();
 let engineMode   = prefs.engineMode   || 'webspeech';
 let vadMode      = prefs.vadMode      || 'fast';
 let gemmaModelKey = prefs.gemmaModelKey || GEMMA_DEFAULT_MODEL_KEY;
+let ttsRate = Number(prefs.ttsRate || 0.95);
 
 // Whisper state
 let transcriber   = null;
@@ -271,8 +277,6 @@ let recognition   = null;
 let restartWebSpeech = false;
 
 // Recognition state
-let pendingField       = null;
-let lastNumericTarget  = null;
 let allResults         = [];
 let feedbackLogs       = loadLogs();
 let statOk = 0;
@@ -285,9 +289,8 @@ let lastTtsAt   = 0;
 
 // Custom fields
 let customFields = loadCustomFields();
-for (const [k, v] of Object.entries(customFields)) {
-  if (!Object.prototype.hasOwnProperty.call(FIELDS, k)) FIELDS[k] = v;
-}
+let FIELDS = createFieldRegistry(customFields);
+const parser = new VoiceSurveyParser(FIELDS);
 
 // Device info (computed once at startup)
 function getGPUInfo() {
@@ -351,6 +354,7 @@ function getSessionInfo() {
 // Init UI
 document.getElementById('engineSelect').value = engineMode;
 document.getElementById('modeSelect').value   = vadMode;
+document.getElementById('ttsRateSelect').value = String(ttsRate.toFixed(2));
 const gms = document.getElementById('gemmaModelSelect');
 if (gms) {
   if ([...gms.options].some(o => o.value === gemmaModelKey)) gms.value = gemmaModelKey;
@@ -370,14 +374,15 @@ function loadPrefs() {
     return {
       ...parsed,
       gemmaModelKey,
+      ttsRate: parsed.ttsRate ?? 0.95,
       _needsResave: gemmaModelKey !== storedGemma || Object.prototype.hasOwnProperty.call(parsed, 'gemmaModelId'),
     };
   } catch {
-    return {gemmaModelKey: GEMMA_DEFAULT_MODEL_KEY, _needsResave: false};
+    return {gemmaModelKey: GEMMA_DEFAULT_MODEL_KEY, ttsRate: 0.95, _needsResave: false};
   }
 }
 function savePrefs() {
-  localStorage.setItem(PREF_KEY, JSON.stringify({engineMode, vadMode, gemmaModelKey}));
+  localStorage.setItem(PREF_KEY, JSON.stringify({engineMode, vadMode, gemmaModelKey, ttsRate}));
 }
 function loadLogs() {
   try { const parsed = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
@@ -392,6 +397,10 @@ function loadCustomFields() {
 }
 function saveCustomFields() {
   localStorage.setItem(CUSTOM_FIELDS_KEY, JSON.stringify(customFields));
+}
+function rebuildFieldRegistry() {
+  FIELDS = createFieldRegistry(customFields);
+  parser.setFields(FIELDS);
 }
 
 async function refreshGemmaAvailability() {
@@ -424,6 +433,14 @@ function escapeHtml(value) {
 function setStatus(type, text) {
   document.getElementById('dot').className = 'dot ' + type;
   document.getElementById('statusText').textContent = text;
+}
+function setLiveResult(stage, text, meta = '', tone = 'interim') {
+  const box = document.getElementById('liveBox');
+  box.className = `live-box ${tone}`;
+  document.getElementById('liveStage').textContent = stage;
+  document.getElementById('liveBadge').textContent = tone === 'final' ? '확정' : tone === 'pending' ? '대기' : '임시';
+  document.getElementById('liveText').textContent = text || '말하는 도중 임시 텍스트가 여기 바로 보입니다.';
+  document.getElementById('liveMeta').textContent = meta || '확정 전에는 임시 텍스트, 확정 후에는 필드와 값이 표시됩니다.';
 }
 function renderModelLog() {
   const box = document.getElementById('modelLog');
@@ -475,7 +492,7 @@ function syncControls() {
   if (!needsWhisper && !needsGemma) {
     startBtn.classList.remove('disabled');
     status.className = 'model-status ready';
-    status.innerHTML = 'iPhone Safari 기본값입니다. 숫자만 다시 말하면 마지막 항목을 수정합니다.<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>';
+    status.innerHTML = 'iPhone Safari 기본값입니다. interim을 먼저 보여주고 final에서 보정합니다.<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>';
     setStatus('ok', 'Web Speech 시작 가능');
   } else if (needsGemma) {
     startBtn.classList.remove('disabled');
@@ -491,7 +508,7 @@ function syncControls() {
       loadBtn.disabled = true;
       loadBtn.classList.add('disabled');
       status.className = 'model-status';
-      status.innerHTML = `Gemma는 WebGPU 전용 실험 기능입니다. 이 환경에서는 비활성화됩니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">이유: ${escapeHtml(gemmaAvailability.reason || 'WebGPU 미지원')}</div><div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
+      status.innerHTML = `Gemma는 비고 정리용 WebGPU 실험 기능입니다. 이 환경에서는 비활성화됩니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">이유: ${escapeHtml(gemmaAvailability.reason || 'WebGPU 미지원')}</div><div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
       setStatus('ok', 'Web Speech 시작 가능 (Gemma 비활성화)');
     } else if (gemmaLoading || gemmaRuntimeState.status === GEMMA_LOAD_STATES.loading) {
       loadBtn.textContent = 'Gemma 로딩중';
@@ -503,17 +520,17 @@ function syncControls() {
     } else if (gemmaLoaded) {
       loadBtn.textContent = 'Gemma 재로드';
       status.className = 'model-status ready';
-      status.innerHTML = `Gemma 보정 준비 완료. Web Speech + Gemma로 시작하세요.<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(getGemmaModelId())} | device ${escapeHtml(window._gemmaDevice || gemmaCfg.device)} | dtype ${escapeHtml(window._gemmaDtype || gemmaCfg.dtype)}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>`;
-      setStatus('ok', 'Web Speech + Gemma 시작 가능');
+      status.innerHTML = `Gemma 비고 정리 준비 완료. 일반 항목은 규칙 기반으로 처리됩니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(getGemmaModelId())} | device ${escapeHtml(window._gemmaDevice || gemmaCfg.device)} | dtype ${escapeHtml(window._gemmaDtype || gemmaCfg.dtype)}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>`;
+      setStatus('ok', 'Web Speech + Gemma 비고 정리 시작 가능');
     } else if (gemmaRuntimeState.status === GEMMA_LOAD_STATES.failed) {
       loadBtn.textContent = 'Gemma 재시도';
       status.className = 'model-status error';
-      status.innerHTML = `Gemma 로드 실패. Web Speech는 계속 사용할 수 있습니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">상세: ${escapeHtml(gemmaRuntimeState.error?.message || '알 수 없는 오류')}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:${progressPct}%"></div></div>`;
+      status.innerHTML = `Gemma 비고 정리 로드 실패. 일반 음성 입력은 계속 사용할 수 있습니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">상세: ${escapeHtml(gemmaRuntimeState.error?.message || '알 수 없는 오류')}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:${progressPct}%"></div></div>`;
       setStatus('ok', 'Web Speech 시작 가능 (Gemma 실패)');
     } else {
       loadBtn.textContent = 'Gemma 로드';
       status.className = 'model-status';
-      status.innerHTML = `Gemma 실험 기능입니다. 로드 실패 시에도 Web Speech는 계속 동작합니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(gemmaCfg.modelId)} | device ${escapeHtml(gemmaCfg.device)} | dtype ${escapeHtml(gemmaCfg.dtype)} | transformers ${escapeHtml(gemmaRuntimeState.runtime?.version || '?')}</div><div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
+      status.innerHTML = `Gemma는 비고 정리 전용 실험 기능입니다. 일반 항목 파서는 LLM 없이 동작합니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(gemmaCfg.modelId)} | device ${escapeHtml(gemmaCfg.device)} | dtype ${escapeHtml(gemmaCfg.dtype)} | transformers ${escapeHtml(gemmaRuntimeState.runtime?.version || '?')}</div><div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
       setStatus('ok', 'Web Speech 시작 가능 (Gemma 미로드)');
     }
   } else {
@@ -542,6 +559,11 @@ window.changeVadMode = function(next) {
   vadMode = next;
   savePrefs();
   setStatus('ok', `${VAD_MODES[vadMode].label} 모드`);
+};
+window.changeTtsRate = function(next) {
+  ttsRate = Number(next || 0.95);
+  savePrefs();
+  setStatus('ok', `TTS 속도 ${ttsRate.toFixed(2)}`);
 };
 window.changeGemmaModel = function(next) {
   gemmaModelKey = sanitizeGemmaModelKey(next);
@@ -679,29 +701,50 @@ window.toggleCustomPanel = function() {
   p.style.display = p.style.display === 'none' ? 'block' : 'none';
 };
 window.addCustomField = function() {
-  const name  = (document.getElementById('cfName').value || '').trim();
-  const type  = document.getElementById('cfType').value;
-  const minV  = document.getElementById('cfMin').value;
-  const maxV  = document.getElementById('cfMax').value;
-  const short = (document.getElementById('cfShort').value || '').trim() || null;
+  const name     = (document.getElementById('cfName').value || '').trim();
+  const type     = document.getElementById('cfType').value;
+  const minV     = document.getElementById('cfMin').value;
+  const maxV     = document.getElementById('cfMax').value;
+  const short    = (document.getElementById('cfShort').value || '').trim() || null;
+  const exampleUtterance = (document.getElementById('cfExample').value || '').trim();
+  const options   = (document.getElementById('cfOptions').value || '').trim();
+  const aliases   = (document.getElementById('cfAliases').value || '').split(',').map((item) => item.trim()).filter(Boolean);
   if (!name) { alert('항목명을 입력하세요'); return; }
   if (Object.prototype.hasOwnProperty.call(FIELDS, name)) { alert('이미 존재하는 항목입니다: ' + name); return; }
-  const range = (minV !== '' && maxV !== '') ? [Number(minV), Number(maxV)] : null;
-  const def   = {type, range, unit: '', short, aliases: short ? [short] : []};
+  const range = (type !== 'text' && type !== 'enum' && minV !== '' && maxV !== '') ? {
+    allowedMin: Number(minV),
+    allowedMax: Number(maxV),
+    warnMin: Number(minV),
+    warnMax: Number(maxV),
+    reconfirmMin: Number(minV),
+    reconfirmMax: Number(maxV),
+  } : null;
+  const def = normalizeCustomFieldDefinition(name, {
+    type,
+    unit: '',
+    short,
+    aliases,
+    options,
+    exampleUtterance,
+    validation: range,
+  });
   customFields[name] = def;
-  FIELDS[name]       = def;
+  rebuildFieldRegistry();
   saveCustomFields();
   renderCustomFieldList();
   document.getElementById('cfName').value  = '';
   document.getElementById('cfShort').value = '';
   document.getElementById('cfMin').value   = '';
   document.getElementById('cfMax').value   = '';
-  recordSystemLog('custom-field-added', {name, type, range, short});
+  document.getElementById('cfExample').value = '';
+  document.getElementById('cfOptions').value = '';
+  document.getElementById('cfAliases').value = '';
+  recordSystemLog('custom-field-added', {name, type, range, short, exampleUtterance, options: def.options, aliasSuggestions: def.aliasSuggestions});
 };
 window.removeCustomField = function(name) {
   if (!customFields[name]) return;
   delete customFields[name];
-  delete FIELDS[name];
+  rebuildFieldRegistry();
   saveCustomFields();
   renderCustomFieldList();
   recordSystemLog('custom-field-removed', {name});
@@ -712,7 +755,7 @@ function renderCustomFieldList() {
   const keys = Object.keys(customFields);
   if (!keys.length) { list.textContent = '추가된 항목 없음'; return; }
   list.innerHTML = keys.map(k =>
-    `<div class="cf-row"><span>${escapeHtml(k)} (${customFields[k].type}${customFields[k].short ? ', 약칭: ' + escapeHtml(customFields[k].short) : ''})</span><button class="mini" data-field="${escapeHtml(k)}" onclick="window.removeCustomField(this.dataset.field)">삭제</button></div>`
+    `<div class="cf-row"><span><b style="color:var(--ac)">${escapeHtml(k)}</b><br>${escapeHtml(customFields[k].type)}${customFields[k].short ? ' / 약칭 ' + escapeHtml(customFields[k].short) : ''}${customFields[k].exampleUtterance ? ' / 예시 ' + escapeHtml(customFields[k].exampleUtterance) : ''}<br>alias: ${escapeHtml((customFields[k].aliasSuggestions || generateAliasSuggestions(k, customFields[k])).slice(0, 6).join(', '))}</span><button class="mini" data-field="${escapeHtml(k)}" onclick="window.removeCustomField(this.dataset.field)">삭제</button></div>`
   ).join('');
 }
 
@@ -740,12 +783,18 @@ function startWebSpeech() {
   capturing = true;
   setStartButton(true);
   setStatus('listen', 'Web Speech 듣는 중');
+  setLiveResult('INTERIM', '음성을 듣는 중입니다.', '말하면 300~700ms 안에 임시 텍스트를 먼저 표시합니다.', 'interim');
   recordSystemLog('capture-start', {engineMode});
 
   recognition.onresult = (event) => {
+    let interimText = '';
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
-      if (!result.isFinal) continue;
+      const transcript = (result[0]?.transcript || '').trim();
+      if (!result.isFinal) {
+        interimText += (interimText ? ' ' : '') + transcript;
+        continue;
+      }
       const alternatives = [];
       for (let j = 0; j < result.length; j++) alternatives.push(result[j].transcript.trim());
       const text = alternatives[0] || '';
@@ -759,6 +808,16 @@ function startWebSpeech() {
       }
       const start = performance.now();
       handleTranscript(text, {engine: 'webspeech', model: 'apple-or-browser-stt', alternatives, asrMs: Math.round(performance.now() - start), capture: {source: 'webspeech'}});
+    }
+    if (interimText) {
+      const preview = parser.preview(interimText);
+      const previewText = preview?.field && preview?.value !== null && preview?.value !== undefined
+        ? `${parser.describeValue(preview.field, preview.value)}`
+        : preview?.field
+          ? `${preview.field} 값 대기`
+          : interimText;
+      const previewMeta = preview?.matchMethod ? `임시 해석: ${preview.matchMethod}` : '음성 수신 중';
+      setLiveResult('INTERIM', previewText, previewMeta, preview?.value === null && preview?.field ? 'pending' : 'interim');
     }
   };
   recognition.onerror = (e) => {
@@ -847,6 +906,7 @@ function stopCapture() {
   preRoll     = [];
   setStartButton(false);
   updateMeter(0);
+  setLiveResult('INTERIM', '중지됨', '다시 시작하면 즉시 출력이 재개됩니다.', 'interim');
   recordSystemLog('capture-stop', {engineMode});
   setStatus('ok', '중지됨');
   speak('음성 입력 종료');
@@ -983,259 +1043,64 @@ function concatBuffers(bufs) {
   return out;
 }
 
-// ---- Text normalization & parsing ----
-function normalizeTranscript(text) {
-  return text
-    .replace(/[""]/g, '"').replace(/['']/g, "'")
-    .replace(/[.,!?。、，]+$/g, '')
-    .replace(/\s+/g, ' ').trim();
-}
-function fieldKey(value) {
-  return String(value || '').toLowerCase()
-    .replace(/\s+/g, '').replace(/[.,!?。、，]/g, '')
-    .replace(UNIT_RE, '').replace(PARTICLE_RE, '');
-}
-function levenshtein(a, b) {
-  const m = a.length; const n = b.length;
-  const d = Array.from({length: m + 1}, () => Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) d[i][0] = i;
-  for (let j = 0; j <= n; j++) d[0][j] = j;
-  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
-    d[i][j] = a[i-1] === b[j-1] ? d[i-1][j-1] : 1 + Math.min(d[i-1][j], d[i][j-1], d[i-1][j-1]);
-  return d[m][n];
-}
-function similarity(a, b) {
-  const max = Math.max(a.length, b.length);
-  return max === 0 ? 1 : 1 - levenshtein(a, b) / max;
-}
-function fieldAliases(field, meta) {
-  return [field, meta.short, ...(meta.aliases || [])].filter(Boolean);
-}
-function matchField(input) {
-  const key  = fieldKey(input);
-  let best   = {field: input, score: 0, method: 'new', rawField: input, candidates: []};
-  const candidates = [];
-  for (const [field, meta] of Object.entries(FIELDS)) {
-    for (const alias of fieldAliases(field, meta)) {
-      const aliasKey = fieldKey(alias);
-      let score = 0; let method = 'fuzzy';
-      if (key === aliasKey) {
-        score  = alias === field ? 1 : 0.98;
-        method = alias === field ? 'exact' : 'alias';
-      } else if (key.includes(aliasKey) && aliasKey.length >= 2) {
-        score  = Math.max(0.82, aliasKey.length / Math.max(key.length, aliasKey.length));
-        method = 'contains-alias';
-      } else if (aliasKey.includes(key) && key.length >= 2) {
-        score  = Math.max(0.74, key.length / aliasKey.length - 0.04);
-        method = 'prefix-alias';
-      } else {
-        score = similarity(key, aliasKey);
-      }
-      if (score >= 0.48) candidates.push({field, alias, score: Number(score.toFixed(4)), method});
-      if (score > best.score) best = {field, score, method, rawField: input};
-    }
+// ---- Text parsing helpers ----
+function summarizeParse(parsed) {
+  if (!parsed) return {display: '', meta: ''};
+  if (parsed.field && parsed.value !== null && parsed.value !== undefined) {
+    return {
+      display: parser.describeValue(parsed.field, parsed.value),
+      meta: `${parsed.matchMethod}${parsed.parseKind ? ` / ${parsed.parseKind}` : ''}`,
+    };
   }
-  candidates.sort((a, b) => b.score - a.score);
-  best.candidates = candidates.slice(0, 5);
-  return best.score >= 0.55 ? best : {field: input, score: 0, method: 'new', rawField: input, candidates: candidates.slice(0, 5)};
-}
-
-function koreanWordToNumber(value) {
-  if (!value) return null;
-  let text = String(value).trim().replace(/\s+/g, '').replace(UNIT_RE, '');
-  text = text.replace(/쩜|점/g, '.').replace(/,/g, '.');
-  if (/^\d+(\.\d+)?$/.test(text)) return Number(text);
-  if (text.includes('.')) {
-    const [left, right] = text.split('.');
-    if (!left || !right) return null;
-    const intValue = koreanInteger(left);
-    const decimal  = koreanDecimal(right);
-    if (intValue !== null && decimal !== null) return Number(`${intValue}.${decimal}`);
-    return null;
+  if (parsed.field) {
+    return {
+      display: `${parsed.field} 값 대기`,
+      meta: parsed.pending?.kind === 'decimal-incomplete' ? '소수점 이하 숫자 대기' : '필드 확인, 값 대기',
+    };
   }
-  return koreanInteger(text);
-}
-function koreanInteger(text) {
-  if (text === '') return null;
-  if (/^\d+$/.test(text)) return Number(text);
-  if (KOREAN_DIGITS[text] !== undefined) return KOREAN_DIGITS[text];
-  const units  = {'십':10,'백':100,'천':1000};
-  let result   = 0; let current = 0; let consumed = false;
-  for (const ch of text) {
-    if (KOREAN_DIGITS[ch] !== undefined) { current = KOREAN_DIGITS[ch]; consumed = true; }
-    else if (units[ch]) { result += (current || 1) * units[ch]; current = 0; consumed = true; }
-    else return null;
-  }
-  result += current;
-  return consumed ? result : null;
-}
-function koreanDecimal(text) {
-  if (text === '') return null;
-  if (/^\d+$/.test(text)) return text;
-  let out = '';
-  for (const ch of text) {
-    if (KOREAN_DIGITS[ch] === undefined) return null;
-    out += KOREAN_DIGITS[ch];
-  }
-  return out;
-}
-
-function expirePending() {
-  if (pendingField && Date.now() - pendingField.setAt > 15000) pendingField = null;
-}
-
-function parseUtterance(rawText) {
-  expirePending();
-  const text = normalizeTranscript(rawText);
-  if (!text) return null;
-  const candidates = [];
-  const normalized = text.replace(/([0-9])\s+([0-9])/g, '$1$2');
-
-  const memo = parseMemo(normalized, rawText);
-  if (memo) return memo;
-
-  const explicitCorrection = parseExplicitCorrection(normalized, rawText);
-  if (explicitCorrection) return explicitCorrection;
-
-  const arabic = normalized.match(/^(.+?)\s*([0-9]+(?:[.,][0-9]+)?)\s*(밀리미터|미리미터|밀리|미리|mm|브릭스|brix|퍼센트|프로|그램|그람|g|개|번|ml|미리리터)?$/i);
-  if (arabic) {
-    const match = matchField(arabic[1]);
-    if (isRegisteredField(match.field)) candidates.push(makeCandidate(match, Number(arabic[2].replace(',', '.')), 'arabic-suffix'));
-  }
-
-  const words = normalized.split(/\s+/).filter(Boolean);
-  for (let take = 1; take <= Math.min(4, words.length - 1); take++) {
-    const numberText = words.slice(-take).join('');
-    let value = koreanWordToNumber(numberText);
-    if (value === null) continue;
-    const fieldText = words.slice(0, -take).join(' ');
-    const match     = matchField(fieldText);
-    if (match.score >= 0.55 && isRegisteredField(match.field)) candidates.push(makeCandidate(match, value, 'korean-suffix'));
-  }
-
-  for (const word of words.slice(-1)) {
-    if (COUNTER_DIGITS[word] === undefined) continue;
-    const fieldText = words.slice(0, -1).join(' ');
-    const match     = matchField(fieldText);
-    if (match.score >= 0.55 && isRegisteredField(match.field) && FIELDS[match.field].type === 'int')
-      candidates.push(makeCandidate(match, COUNTER_DIGITS[word], 'counter-suffix'));
-  }
-
-  const compactRaw = normalized.toLowerCase().replace(/\s+/g, '').replace(/[.,!?。、，]/g, '').replace(UNIT_RE, '');
-  const digitWords = Object.keys(COUNTER_DIGITS).sort((a, b) => b.length - a.length);
-  for (const digitWord of digitWords) {
-    if (!compactRaw.endsWith(digitWord) || compactRaw.length <= digitWord.length) continue;
-    const fieldText = compactRaw.slice(0, -digitWord.length);
-    const match     = matchField(fieldText);
-    if (match.score >= 0.55 && isRegisteredField(match.field) && FIELDS[match.field].type === 'int')
-      candidates.push(makeCandidate(match, COUNTER_DIGITS[digitWord], 'attached-korean-digit'));
-  }
-
-  const compact = fieldKey(normalized);
-  for (let cut = 1; cut <= Math.min(8, compact.length - 1); cut++) {
-    const numberText = compact.slice(-cut);
-    const value      = koreanWordToNumber(numberText);
-    if (value === null) continue;
-    const fieldText  = compact.slice(0, -cut);
-    const match      = matchField(fieldText);
-    if (match.score >= 0.62 && isRegisteredField(match.field)) candidates.push(makeCandidate(match, value, 'compact-korean'));
-  }
-
-  const numOnly = koreanWordToNumber(normalized);
-  if (numOnly !== null) {
-    if (pendingField) {
-      const field = pendingField.field;
-      pendingField = null;
-      return {rawText, normalizedText: normalized, rawField: `[이전:${field}]`, field, value: numOnly, matchScore: 0.96, matchMethod: 'pending', candidates: [{field, score: 0.96, method: 'pending'}]};
-    }
-    const overwrite = makeOverwriteResult(rawText, normalized, numOnly);
-    if (overwrite) return overwrite;
-    candidates.push({rawField: null, field: null, value: numOnly, matchScore: 0, matchMethod: 'number-only', candidates: []});
-  }
-
-  if (candidates.length === 0) {
-    const match = matchField(normalized);
-    if (match.score >= 0.62 && FIELDS[match.field]) {
-      pendingField = {field: match.field, setAt: Date.now(), rawText};
-      return {rawText, normalizedText: normalized, rawField: normalized, field: match.field, value: null, matchScore: match.score, matchMethod: 'pending-set', candidates: match.candidates};
-    }
-    return {rawText, normalizedText: normalized, rawField: normalized, field: null, value: null, matchScore: match.score, matchMethod: 'unmatched', candidates: match.candidates};
-  }
-
-  candidates.sort((a, b) => b.matchScore - a.matchScore);
-  const best = candidates[0];
-  if (best.field) pendingField = null;
-  return {...best, rawText, normalizedText: normalized};
-}
-
-function isRegisteredField(field) {
-  return Object.prototype.hasOwnProperty.call(FIELDS, field);
-}
-function makeOverwriteResult(rawText, normalizedText, value) {
-  if (!lastNumericTarget || Date.now() - lastNumericTarget.setAt >= 60000) return null;
-  const field = lastNumericTarget.field;
-  return {rawText, normalizedText, rawField: `[수정:${field}]`, field, value, matchScore: 0.94, matchMethod: 'overwrite-last-number', replacesLogId: lastNumericTarget.logId, candidates: [{field, score: 0.94, method: 'overwrite-last-number'}]};
-}
-function parseExplicitCorrection(normalized, rawText) {
-  const match = normalized.match(/^(수정|정정)\s+(.+)$/);
-  if (!match) return null;
-  const rest  = match[2];
-  const value = koreanWordToNumber(rest);
-  if (value !== null) return makeOverwriteResult(rawText, normalized, value);
-  const withField = rest.match(/^(.+?)\s*([0-9]+(?:[.,][0-9]+)?)\s*(밀리미터|미리미터|밀리|미리|mm|브릭스|brix|퍼센트|프로|그램|그람|g|개|번|ml|미리리터)?$/i);
-  if (!withField) return null;
-  const fieldMatch = matchField(withField[1]);
-  if (!isRegisteredField(fieldMatch.field)) return null;
-  const replacingSameField = lastNumericTarget?.field === fieldMatch.field ? lastNumericTarget.logId : null;
-  return {rawText, normalizedText: normalized, rawField: `[수정:${fieldMatch.field}]`, field: fieldMatch.field, value: Number(withField[2].replace(',', '.')), matchScore: fieldMatch.score, matchMethod: 'explicit-correction', replacesLogId: replacingSameField, candidates: fieldMatch.candidates};
-}
-function parseMemo(normalized, rawText) {
-  const aliases = fieldAliases('비고', FIELDS['비고']).sort((a, b) => b.length - a.length);
-  for (const alias of aliases) {
-    const re    = new RegExp('^' + alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s+(.+)$', 'i');
-    const match = normalized.match(re);
-    if (match) return {rawText, normalizedText: normalized, rawField: alias, field: '비고', value: match[1].trim(), matchScore: alias === '비고' ? 1 : 0.98, matchMethod: 'memo-text', candidates: [{field: '비고', alias, score: alias === '비고' ? 1 : 0.98, method: 'memo'}]};
-  }
-  return null;
-}
-function makeCandidate(match, value, method) {
-  return {rawField: match.rawField, field: match.field, value, matchScore: match.score, matchMethod: method + ':' + match.method, candidates: match.candidates};
-}
-function validateValue(field, value) {
-  const meta = FIELDS[field];
-  if (!meta || !meta.range || value === null) return {valid: true};
-  const [min, max] = meta.range;
-  if (value < min || value > max) return {valid: false, warning: `범위 확인 필요 ${min}~${max}${meta.unit}`};
-  if (meta.type === 'int' && !Number.isInteger(value)) return {valid: false, warning: '정수 항목입니다'};
-  return {valid: true};
+  return {display: parsed.rawText || parsed.normalizedText || '', meta: parsed.matchMethod || ''};
 }
 
 // ---- Handle transcript ----
 function handleTranscript(text, meta) {
   totalRecognitionCount++;
-  const started  = performance.now();
-  const parsed   = parseUtterance(text);
-  const parseMs  = Math.round(performance.now() - started);
-  let status     = 'ok';
-  let message    = '';
+  const started = performance.now();
+  const parsed  = parser.parseUtterance(text);
+  const parseMs = Math.round(performance.now() - started);
+  const summary = summarizeParse(parsed);
+  let status = 'ok';
+  let message = '';
+
   if (!parsed || !parsed.field) {
-    status  = 'fail';
+    status = 'fail';
     message = parsed?.matchMethod === 'number-only' ? '항목 없이 숫자만 인식됨' : '파싱 실패';
     statFail++;
-  } else if (parsed.matchMethod === 'pending-set') {
-    status  = 'warn';
-    message = '값을 이어서 말씀하세요';
-  } else if (parsed.value !== null) {
-    const validation = validateValue(parsed.field, parsed.value);
-    if (!validation.valid) { status = 'warn'; message = validation.warning; }
-    if (parsed.matchMethod === 'overwrite-last-number' || parsed.matchMethod === 'explicit-correction') {
+  } else if (parsed.value === null || parsed.value === undefined) {
+    status = 'warn';
+    message = parsed.matchMethod.includes('decimal') ? '소수점 이하 숫자를 이어서 말하세요' : '값을 이어서 말씀하세요';
+  } else {
+    const validation = parser.validateValue(parsed.field, parsed.value);
+    if (validation.severity === 'warn') {
+      status = 'warn';
+      message = validation.message;
+    } else if (validation.severity === 'reconfirm') {
+      status = 'warn';
+      message = validation.message || '재확인 권장';
+    } else if (validation.severity === 'fail') {
+      status = 'fail';
+      message = validation.message;
+      statFail++;
+    }
+    if (!message && (parsed.matchMethod === 'overwrite-last-number' || parsed.matchMethod === 'explicit-correction')) {
       message = `${parsed.field} 이전 값을 ${parsed.value}로 덮어씀`;
-    } else if (parsed.matchScore < 0.8 && !parsed.matchMethod.startsWith('pending')) {
-      status  = 'warn';
+    } else if (!message && parsed.matchScore < 0.8 && !parsed.matchMethod.startsWith('pending')) {
+      status = 'warn';
       message = `"${parsed.rawField}" -> "${parsed.field}" 후보 ${Math.round(parsed.matchScore * 100)}%`;
     }
-    statOk++;
+    if (status !== 'fail') statOk++;
   }
+
+  setLiveResult('FINAL', summary.display || text, message || summary.meta || '확정 결과', status === 'warn' ? 'pending' : 'final');
   const log = recordRecognitionLog(text, parsed, {...meta, parseMs, status, message});
   if ((parsed?.matchMethod === 'overwrite-last-number' || parsed?.matchMethod === 'explicit-correction') && parsed.replacesLogId) {
     markLogOverwritten(parsed.replacesLogId, log.id, parsed.value);
@@ -1245,20 +1110,26 @@ function handleTranscript(text, meta) {
   const entry = {raw: text, field: parsed?.field, value: parsed?.value, status, message, matchMethod: parsed?.matchMethod, matchScore: parsed?.matchScore, logId: log.id, replacesLogId: parsed?.replacesLogId};
   addCard(entry);
   if (parsed?.field && parsed.value !== null) {
-    if (FIELDS[parsed.field]?.type !== 'text') lastNumericTarget = {field: parsed.field, logId: log.id, setAt: Date.now(), value: parsed.value};
+    if (FIELDS[parsed.field]?.type !== 'text' && FIELDS[parsed.field]?.type !== 'enum') {
+      parser.setLastNumericTarget({field: parsed.field, logId: log.id, setAt: Date.now(), value: parsed.value});
+    }
     try { navigator.vibrate(status === 'ok' ? [35] : [45, 35, 45]); } catch {}
     const isOverwrite = parsed.matchMethod === 'overwrite-last-number' || parsed.matchMethod === 'explicit-correction';
-    speak(isOverwrite ? `수정 ${parsed.field}, ${parsed.value}` : `${parsed.field}, ${parsed.value}`);
+    const speakText = parsed.field === '비고'
+      ? '비고 저장'
+      : isOverwrite
+        ? `수정 ${parser.describeValue(parsed.field, parsed.value)}`
+        : parser.describeValue(parsed.field, parsed.value);
+    speak(speakText);
     showToast(isOverwrite ? `수정 ${parsed.field}` : parsed.field, parsed.value);
-    // Gemma async post-processing (non-blocking)
-    if (gemmaLoaded && engineMode === 'webspeech-gemma' && !isOverwrite) {
-      gemmaCorrectAsync(text, log.id, parsed).catch(() => {});
+    if (parsed.field === '비고' && gemmaLoaded && engineMode === 'webspeech-gemma') {
+      refineNoteAsync(text, log.id, parsed).catch(() => {});
     }
   }
 }
 
-// ---- Gemma async correction ----
-async function gemmaCorrectAsync(rawText, logId, fuzzyParsed) {
+// ---- Gemma async note refinement ----
+async function refineNoteAsync(rawText, logId, parsedNote) {
   const processor = window._gemmaProcessor;
   const model     = window._gemmaModel;
   if (!processor || !model) return;
@@ -1266,49 +1137,42 @@ async function gemmaCorrectAsync(rawText, logId, fuzzyParsed) {
     const {text: generated, latencyMs} = await runGemmaTextCorrection({
       processor,
       model,
-      rawText,
-      fieldList: Object.keys(FIELDS),
+      rawText: `원문: ${rawText}\n지시: 감귤조사 비고를 새 사실 추가 없이 짧게 정리하고 한국어 결과만 출력`,
+      fieldList: ['비고'],
       aliasHints: GEMMA_ALIAS_HINTS,
-      maxNewTokens: 10,
+      maxNewTokens: 48,
     });
     if (!generated) return;
 
-    const gemmaParsed = parseUtterance(generated);
-    const corrected   = !!(gemmaParsed?.field && gemmaParsed?.value !== null &&
-      (gemmaParsed.field !== fuzzyParsed?.field || gemmaParsed.value !== fuzzyParsed?.value));
-
-    // Update log entry with Gemma result
     const logEntry = feedbackLogs.find(l => l.id === logId);
     if (logEntry) {
-      logEntry.gemma = {inputText: rawText, outputText: generated, latencyMs, corrected, modelId: getGemmaModelId()};
+      logEntry.gemma = {
+        inputText: rawText,
+        outputText: generated.trim(),
+        latencyMs,
+        corrected: generated.trim() !== rawText.trim(),
+        modelId: getGemmaModelId(),
+        mode: 'note-refine',
+      };
       persistLogs();
     }
 
-    // Update card if Gemma produced a different result
-    if (corrected && gemmaParsed?.field && gemmaParsed?.value !== null) {
-      const area = document.getElementById('results');
-      const card = area.querySelector(`[data-log-id="${logId}"]`);
-      if (card) {
-        card.classList.add('gemma-corrected');
-        const parsedDiv = card.querySelector('.card-parsed');
-        if (parsedDiv) {
-          parsedDiv.innerHTML = `<span class="card-field">${escapeHtml(gemmaParsed.field)}</span><span class="card-value">${escapeHtml(String(gemmaParsed.value))}</span><span class="badge-gemma">Gemma</span>`;
-        }
-        const metaDivs = card.querySelectorAll('.card-meta');
-        const gemmaMetaText = `Gemma 보정: "${escapeHtml(fuzzyParsed?.field ?? '?')}" → "${escapeHtml(gemmaParsed.field)}" (${latencyMs}ms)`;
-        if (metaDivs.length > 0) {
-          metaDivs[0].innerHTML = gemmaMetaText;
-        } else {
-          const d = document.createElement('div');
-          d.className   = 'card-meta';
-          d.innerHTML   = gemmaMetaText;
-          card.appendChild(d);
-        }
-      }
+    const area = document.getElementById('results');
+    const card = area.querySelector(`[data-log-id="${logId}"]`);
+    if (card) {
+      card.classList.add('gemma-corrected');
+      const meta = document.createElement('div');
+      meta.className = 'card-meta';
+      meta.innerHTML = `Gemma 비고 정리 <span class="badge-gemma">Gemma</span>: ${escapeHtml(generated.trim())} (${latencyMs}ms)`;
+      card.appendChild(meta);
     }
-    recordSystemLog('gemma-correction', {logId, inputText: rawText, outputText: generated, corrected, latencyMs, modelId: getGemmaModelId()});
+
+    if (parsedNote?.field === '비고') {
+      setLiveResult('FINAL', `비고 저장`, `원문 유지 / Gemma 정리: ${generated.trim()}`, 'final');
+    }
+    recordSystemLog('gemma-note-refine', {logId, inputText: rawText, outputText: generated.trim(), latencyMs, modelId: getGemmaModelId()});
   } catch(e) {
-    recordSystemLog('gemma-error', {logId, error: e.message, modelId: getGemmaModelId()});
+    recordSystemLog('gemma-note-error', {logId, error: e.message, modelId: getGemmaModelId()});
   }
 }
 
@@ -1325,7 +1189,7 @@ function recordRecognitionLog(rawText, parsed, meta) {
     rawText,
     alternatives:    meta.alternatives || [],
     normalizedText:  parsed?.normalizedText || '',
-    parse:           parsed ? {field: parsed.field, value: parsed.value, rawField: parsed.rawField, matchScore: parsed.matchScore, matchMethod: parsed.matchMethod, replacesLogId: parsed.replacesLogId || null, candidates: parsed.candidates || []} : null,
+    parse:           parsed ? {field: parsed.field, value: parsed.value, rawField: parsed.rawField, matchScore: parsed.matchScore, matchMethod: parsed.matchMethod, parseKind: parsed.parseKind || null, replacesLogId: parsed.replacesLogId || null, candidates: parsed.candidates || []} : null,
     status:          meta.status  || 'fail',
     message:         meta.message || meta.failure || '',
     timing:          {asrMs: meta.asrMs ?? null, parseMs: meta.parseMs ?? null},
@@ -1374,7 +1238,10 @@ function addCard(entry) {
   if (entry.logId) div.dataset.logId = entry.logId;
   let html = `<div class="card-raw">음성 "${escapeHtml(entry.raw)}"</div>`;
   if (entry.field && entry.value !== null && entry.value !== undefined) {
-    html += `<div class="card-parsed"><span class="card-field">${escapeHtml(entry.field)}</span><span class="card-value">${escapeHtml(entry.value)}</span></div>`;
+    const valueMarkup = typeof entry.value === 'string'
+      ? `<span class="card-value" style="font-size:18px">${escapeHtml(entry.value)}</span>`
+      : `<span class="card-value">${escapeHtml(entry.value)}</span>`;
+    html += `<div class="card-parsed"><span class="card-field">${escapeHtml(entry.field)}</span>${valueMarkup}</div>`;
   } else if (entry.field) {
     html += `<div class="card-parsed"><span class="card-field">${escapeHtml(entry.field)}</span><span class="card-value" style="font-size:14px;color:var(--txd)">값 대기중</span></div>`;
   }
@@ -1398,7 +1265,7 @@ window.correctLog = function(id) {
   if (!log) return;
   const answer = prompt('정답을 입력하세요. 예: 횡경 45.2 / 조사나무 3 / 과피두께 2.1', '');
   if (!answer) return;
-  const parsed = parseUtterance(answer);
+  const parsed = parser.preview(answer);
   log.feedback = {...(log.feedback || {}), verdict: 'corrected', expectedText: answer, expectedField: parsed?.field || '', expectedValue: parsed?.value ?? '', at: nowIso()};
   persistLogs();
   setStatus('ok', '수정 정답이 로그에 저장됨');
@@ -1420,18 +1287,18 @@ function speak(text) {
   lastTtsAt   = Date.now();
   const utterance  = new SpeechSynthesisUtterance(text);
   utterance.lang   = 'ko-KR';
-  utterance.rate   = 1.32;
+  utterance.rate   = ttsRate;
   window.speechSynthesis.speak(utterance);
 }
 
 // ---- Clear & Export ----
 window.clearResults = function() {
   if (capturing) stopCapture();
-  allResults        = [];
-  pendingField      = null;
-  lastNumericTarget = null;
+  allResults = [];
+  parser.clearState();
   statOk = 0; statFail = 0; lastLatency = '-';
   document.getElementById('results').innerHTML = '<div class="empty" id="empty">화면 결과만 초기화되었습니다.<br>피드백 로그는 JSON/CSV 버튼으로 내보낼 수 있습니다.</div>';
+  setLiveResult('INTERIM', '말하는 도중 임시 텍스트가 여기 바로 보입니다.', '확정 전에는 임시 텍스트, 확정 후에는 필드와 값이 표시됩니다.', 'interim');
   updateStats();
   recordSystemLog('screen-clear', {});
 };
