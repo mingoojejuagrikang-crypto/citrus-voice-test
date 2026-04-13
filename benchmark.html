@@ -39,7 +39,12 @@
   .badge.pass{background:var(--gn);color:#000}
   .badge.fail{background:var(--rd);color:#fff}
   .badge.pend{background:var(--txm);color:#000}
+  .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .diag-card{background:var(--sf2);border-radius:8px;padding:10px;font-size:11px;line-height:1.6;color:var(--txd)}
+  .diag-card b{color:var(--txm)}
 </style>
+  <script type="module" crossorigin src="./assets/benchmark-COsf2wpU.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/gemma-loader-PXyAJwQf.js">
 </head>
 <body>
 <h1>Gemma 4 E2B 벤치마크</h1>
@@ -54,9 +59,8 @@
       </select>
     </label>
     <label>디바이스
-      <select id="deviceSelect">
-        <option value="wasm">WASM (호환성 우선)</option>
-        <option value="webgpu">WebGPU (GPU 가속)</option>
+      <select id="deviceSelect" disabled>
+        <option value="webgpu">WebGPU 전용</option>
       </select>
     </label>
   </div>
@@ -68,6 +72,14 @@
   <div class="prog-wrap">
     <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
     <div class="log" id="logBox">모델을 로드한 후 벤치마크를 실행하세요.</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>런타임 진단</h2>
+  <div class="diag-grid">
+    <div class="diag-card" id="runtimeDiag">로딩 중...</div>
+    <div class="diag-card" id="loadDiag">모델 로드 전</div>
   </div>
 </div>
 
@@ -92,377 +104,5 @@
   </div>
 </div>
 
-<script type="module">
-const GEMMA_MODEL_CONFIGS = {
-  'gemma-4-e2b': {
-    modelId: 'onnx-community/gemma-4-E2B-it-ONNX',
-    dtypeWebGPU: 'q4f16',
-    dtypeWASM: 'q8',
-  },
-};
-const GEMMA_ALIAS_HINTS = [
-  '변경=횡경', '행경=횡경', '은경=횡경', '엔경=횡경', '현경=횡경', '안경=횡경',
-  '존경=종경', '동경=종경', '정경=종경',
-  '거실=과실', '마실=과실', '바실=과실', '아실=과실',
-  '나무=조사나무', '과피=과피두께',
-];
-
-const TEST_CASES = [
-  {input: '변경 22.5',   expected: '횡경 22.5'},
-  {input: '존경 35.7',   expected: '종경 35.7'},
-  {input: '은경 85.5',   expected: '횡경 85.5'},
-  {input: '거실 삼',     expected: '과실 3'},
-  {input: '행경 91.2',   expected: '횡경 91.2'},
-  {input: '나무 일',     expected: '나무 1'},
-  {input: '엔경 122.4',  expected: '횡경 122.4'},
-  {input: '마실 사',     expected: '과실 4'},
-  {input: '동경 39.9',   expected: '종경 39.9'},
-  {input: '과피 2.5',    expected: '과피 2.5'},
-];
-
-const FIELDS_LIST = ['조사나무','조사과실','횡경','종경','과중','당도','산도','착색','경도','과피두께','비타민C','구연산','과즙량','씨수','비고'];
-
-let benchProcessor = null;
-let benchModel     = null;
-let benchResults   = [];
-let loadMs         = 0;
-let benchRuntime   = {modelId: null, device: null, dtype: null};
-
-function getGemmaConfig(modelKey) {
-  return GEMMA_MODEL_CONFIGS[modelKey] || GEMMA_MODEL_CONFIGS['gemma-4-e2b'];
-}
-
-// Show device info
-function getGPUInfo() {
-  try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-    if (!gl) return null;
-    const ext = gl.getExtension('WEBGL_debug_renderer_info');
-    return {
-      vendor:   ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)   : null,
-      renderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null,
-    };
-  } catch { return null; }
-}
-
-function renderDeviceInfo() {
-  const gpu = getGPUInfo();
-  const el  = document.getElementById('deviceInfo');
-  const rows = [
-    ['User Agent',      navigator.userAgent],
-    ['Platform',        navigator.platform],
-    ['CPU Cores',       navigator.hardwareConcurrency || '?'],
-    ['Device Memory',   (navigator.deviceMemory ? navigator.deviceMemory + ' GB' : '?')],
-    ['Screen',          `${screen.width}×${screen.height} @${window.devicePixelRatio}x`],
-    ['GPU Vendor',      gpu?.vendor || '?'],
-    ['GPU Renderer',    gpu?.renderer || '?'],
-    ['Connection',      navigator.connection?.effectiveType || '?'],
-    ['iOS',             /iPad|iPhone|iPod/.test(navigator.userAgent) ? 'Yes' : 'No'],
-    ['Android',         /Android/.test(navigator.userAgent) ? 'Yes' : 'No'],
-  ];
-  el.innerHTML = rows.map(([k, v]) => `<b style="color:var(--txm)">${k}:</b> ${String(v)}`).join('<br>');
-}
-renderDeviceInfo();
-
-// Init table
-function initTable() {
-  const tbody = document.getElementById('testBody');
-  tbody.innerHTML = TEST_CASES.map((tc, i) =>
-    `<tr id="row-${i}"><td>${i+1}</td><td>${escHtml(tc.input)}</td><td>${escHtml(tc.expected)}</td><td id="out-${i}">-</td><td id="ms-${i}">-</td><td id="res-${i}"><span class="badge pend">대기</span></td></tr>`
-  ).join('');
-}
-initTable();
-
-function escHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-function log(msg) {
-  const box = document.getElementById('logBox');
-  box.textContent += '\n' + msg;
-  box.scrollTop = box.scrollHeight;
-}
-
-window.loadBenchModel = async function() {
-  const modelKey    = document.getElementById('modelSelect').value;
-  const modelCfg    = getGemmaConfig(modelKey);
-  const modelId     = modelCfg.modelId;
-  let   device      = document.getElementById('deviceSelect').value;
-  const btn         = document.getElementById('btnLoad');
-  const fill        = document.getElementById('progFill');
-  btn.classList.add('disabled');
-  btn.textContent = '로딩중...';
-  document.getElementById('logBox').textContent = `모델 로드 시작: ${modelId}`;
-
-  // WebGPU 가용성 확인
-  if (device === 'webgpu') {
-    try {
-      const adapter = 'gpu' in navigator ? await navigator.gpu.requestAdapter() : null;
-      if (!adapter) { device = 'wasm'; log('WebGPU 미지원 → WASM 폴백'); }
-    } catch { device = 'wasm'; log('WebGPU 초기화 실패 → WASM 폴백'); }
-  }
-  const loadTargets = [];
-  if (device === 'webgpu') loadTargets.push({device: 'webgpu', dtype: modelCfg.dtypeWebGPU});
-  loadTargets.push({device: 'wasm', dtype: modelCfg.dtypeWASM});
-  log(`우선 디바이스: ${loadTargets[0].device}, dtype: ${loadTargets[0].dtype}`);
-
-  const t0 = performance.now();
-  try {
-    const {AutoProcessor, Gemma4ForConditionalGeneration, env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
-    env.allowLocalModels = false;
-    try { env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1)); } catch {}
-
-    const progressCb = (p, target) => {
-      if (p?.status === 'progress_total' && Number.isFinite(Number(p?.progress))) {
-        const pct = Math.max(0, Math.min(100, Math.round(Number(p.progress))));
-        fill.style.width = pct + '%';
-        log(`  ${target.device} 전체 진행률 ${pct}%`);
-        return;
-      }
-      const total = Number(p?.total ?? p?.progress_total ?? 0);
-      const loaded = Number(p?.loaded ?? p?.progress ?? 0);
-      if (total > 0 && loaded >= 0) {
-        const pct = Math.min(100, Math.round(loaded / total * 100));
-        fill.style.width = pct + '%';
-        const loadedMb = (loaded / 1048576).toFixed(0);
-        const totalMb  = (total / 1048576).toFixed(0);
-        log(`  ${target.device} ${p.file || 'model'} ${pct}% (${loadedMb}/${totalMb}MB)`);
-      }
-      if (p.status === 'ready') fill.style.width = '100%';
-    };
-
-    let lastError = null;
-    for (const target of loadTargets) {
-      try {
-        log(`AutoProcessor 로드 중... (${target.device}, ${target.dtype})`);
-        benchProcessor = await AutoProcessor.from_pretrained(modelId, {
-          progress_callback: (p) => progressCb(p, target),
-        });
-        log('Gemma4ForConditionalGeneration 로드 중...');
-        benchModel = await Gemma4ForConditionalGeneration.from_pretrained(modelId, {
-          dtype: target.dtype,
-          device: target.device,
-          progress_callback: (p) => progressCb(p, target),
-        });
-        benchRuntime = {modelId, device: target.device, dtype: target.dtype};
-        loadMs = Math.round(performance.now() - t0);
-        log(`✓ 모델 로드 완료: ${loadMs}ms (${target.device}, ${target.dtype})`);
-        btn.textContent = '재로드';
-        btn.classList.remove('disabled');
-        document.getElementById('btnRun').classList.remove('disabled');
-        return;
-      } catch (e) {
-        lastError = e;
-        log(`  ${target.device} 로드 실패: ${e.message}`);
-      }
-    }
-
-    throw lastError || new Error('모델 로드 실패');
-  } catch(e) {
-    log(`✗ 로드 실패: ${e.message}`);
-    btn.textContent = '재시도';
-    btn.classList.remove('disabled');
-    benchProcessor = null;
-    benchModel = null;
-    benchRuntime = {modelId: null, device: null, dtype: null};
-  }
-};
-
-window.runBenchmark = async function() {
-  if (!benchProcessor || !benchModel) { log('먼저 모델을 로드하세요'); return; }
-  document.getElementById('btnRun').classList.add('disabled');
-  benchResults = [];
-  const times = [];
-  let correct = 0;
-
-  document.getElementById('summary').style.display = 'none';
-  initTable();
-  log('\n--- 벤치마크 시작 ---');
-
-  for (let i = 0; i < TEST_CASES.length; i++) {
-    const tc  = TEST_CASES[i];
-    const row = document.getElementById(`row-${i}`);
-    row.className = 'running';
-    document.getElementById(`res-${i}`).innerHTML = '<span class="badge pend">실행중</span>';
-
-    const prompt = buildPrompt(tc.input);
-    const t0     = performance.now();
-    let output   = '';
-    let ok       = false;
-
-    try {
-      const {formattedPrompt, inputs} = await buildGemmaInputs(benchProcessor, prompt);
-      const outputIds = await benchModel.generate({...inputs, max_new_tokens: 10, do_sample: false, temperature: 0.1});
-      output = extractGemmaOutputText(benchProcessor, outputIds, inputs, formattedPrompt);
-    } catch(e) {
-      output = `ERROR: ${e.message}`;
-    }
-
-    const ms = Math.round(performance.now() - t0);
-    times.push(ms);
-    ok = normalizedMatch(output, tc.expected);
-    if (ok) correct++;
-
-    benchResults.push({input: tc.input, expected: tc.expected, output, ms, ok});
-
-    document.getElementById(`out-${i}`).textContent = output || '(없음)';
-    document.getElementById(`ms-${i}`).textContent  = ms;
-    document.getElementById(`res-${i}`).innerHTML   = ok ? '<span class="badge pass">PASS</span>' : '<span class="badge fail">FAIL</span>';
-    row.className = ok ? 'pass' : 'fail';
-    log(`#${i+1} "${tc.input}" → "${output}" (${ms}ms) ${ok ? 'PASS' : 'FAIL'}`);
-  }
-
-  const avg = Math.round(times.reduce((s, v) => s + v, 0) / times.length);
-  const min = Math.min(...times);
-  const max = Math.max(...times);
-  const acc = Math.round(correct / TEST_CASES.length * 100);
-
-  document.getElementById('sumAcc').textContent = acc + '%';
-  document.getElementById('sumAvg').textContent = avg + 'ms';
-  document.getElementById('sumMin').textContent = min + 'ms';
-  document.getElementById('sumMax').textContent = max + 'ms';
-  document.getElementById('summary').style.display = 'grid';
-
-  log(`\n=== 완료: 정확도 ${acc}% (${correct}/${TEST_CASES.length}), 평균 ${avg}ms, 최소 ${min}ms, 최대 ${max}ms ===`);
-  document.getElementById('btnRun').classList.remove('disabled');
-  document.getElementById('btnExport').classList.remove('disabled');
-};
-
-function buildPrompt(text) {
-  return `감귤조사 보정.\n항목: ${FIELDS_LIST.join(', ')}\n사전: ${GEMMA_ALIAS_HINTS.join(', ')}\n입력: "${text}"\n보정결과만:`;
-}
-
-function normalizedMatch(output, expected) {
-  if (!output) return false;
-  const norm = (s) => s.trim().replace(/\s+/g, ' ').toLowerCase();
-  return norm(output).includes(norm(expected)) || norm(expected).includes(norm(output.split(' ').slice(0, 2).join(' ')));
-}
-
-window.exportResults = function() {
-  if (!benchResults.length) { alert('먼저 벤치마크를 실행하세요'); return; }
-  const gpu    = getGPUInfo();
-  const times  = benchResults.map(r => r.ms);
-  const data   = {
-    timestamp:    new Date().toISOString(),
-    modelId:      benchRuntime.modelId || getGemmaConfig(document.getElementById('modelSelect').value).modelId,
-    device:       benchRuntime.device || document.getElementById('deviceSelect').value,
-    dtype:        benchRuntime.dtype || null,
-    loadMs,
-    stats: {
-      accuracy:   Math.round(benchResults.filter(r => r.ok).length / benchResults.length * 100),
-      avgMs:      Math.round(times.reduce((s, v) => s + v, 0) / times.length),
-      minMs:      Math.min(...times),
-      maxMs:      Math.max(...times),
-      passed:     benchResults.filter(r => r.ok).length,
-      total:      benchResults.length,
-    },
-    cases: benchResults,
-    deviceInfo: {
-      userAgent:          navigator.userAgent,
-      platform:           navigator.platform,
-      hardwareConcurrency:navigator.hardwareConcurrency || null,
-      deviceMemory:       navigator.deviceMemory || null,
-      screenWidth:        screen.width,
-      screenHeight:       screen.height,
-      devicePixelRatio:   window.devicePixelRatio,
-      gpu,
-      connectionType:     navigator.connection?.effectiveType || null,
-      isIOS:              /iPad|iPhone|iPod/.test(navigator.userAgent),
-      isAndroid:          /Android/.test(navigator.userAgent),
-    },
-  };
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const blob  = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-  const url   = URL.createObjectURL(blob);
-  const a     = document.createElement('a');
-  a.href      = url;
-  a.download  = `gemma-benchmark-${stamp}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-};
-
-async function buildGemmaInputs(processor, promptText) {
-  let formattedPrompt = promptText;
-  try {
-    if (typeof processor.apply_chat_template === 'function') {
-      formattedPrompt = processor.apply_chat_template(
-        [{role: 'user', content: [{type: 'text', text: promptText}]}],
-        {tokenize: false, add_generation_prompt: true}
-      );
-    }
-  } catch {
-    try {
-      if (typeof processor.apply_chat_template === 'function') {
-        formattedPrompt = processor.apply_chat_template(
-          [{role: 'user', content: promptText}],
-          {tokenize: false, add_generation_prompt: true}
-        );
-      }
-    } catch {}
-  }
-
-  try {
-    return {
-      formattedPrompt,
-      inputs: await processor(formattedPrompt, null, null, {add_special_tokens: false}),
-    };
-  } catch {
-    return {
-      formattedPrompt,
-      inputs: await processor(formattedPrompt),
-    };
-  }
-}
-
-function getInputTokenLength(inputs) {
-  const dims = inputs?.input_ids?.dims;
-  if (Array.isArray(dims) && dims.length) return dims[dims.length - 1];
-  const values = inputs?.input_ids?.[0];
-  if (Array.isArray(values)) return values.length;
-  return 0;
-}
-
-function decodeInputText(processor, inputs) {
-  try {
-    if (typeof processor.batch_decode === 'function') {
-      return processor.batch_decode(inputs.input_ids, {skip_special_tokens: true})[0] || '';
-    }
-  } catch {}
-  try {
-    if (typeof processor.decode === 'function' && inputs?.input_ids?.[0]) {
-      return processor.decode(inputs.input_ids[0], {skip_special_tokens: true}) || '';
-    }
-  } catch {}
-  return '';
-}
-
-function extractGemmaOutputText(processor, outputIds, inputs, formattedPrompt) {
-  const inputLen = getInputTokenLength(inputs);
-  try {
-    if (typeof outputIds?.slice === 'function' && inputLen) {
-      const generatedTokens = outputIds.slice(null, [inputLen, null]);
-      const generated = processor.batch_decode(generatedTokens, {skip_special_tokens: true})[0] || '';
-      const trimmed = generated.trim().split('\n')[0].trim();
-      if (trimmed) return trimmed;
-    }
-  } catch {}
-
-  try {
-    const fullDecoded  = processor.batch_decode(outputIds, {skip_special_tokens: true})[0] || '';
-    const inputDecoded = decodeInputText(processor, inputs);
-    const afterPrompt  = inputDecoded ? fullDecoded.slice(inputDecoded.length).trim() : fullDecoded.replace(formattedPrompt, '').trim();
-    const firstLine    = afterPrompt.split('\n')[0].trim();
-    if (firstLine) return firstLine;
-    const idx = Math.max(fullDecoded.lastIndexOf('보정:'), fullDecoded.lastIndexOf('보정결과만:'));
-    if (idx >= 0) return fullDecoded.slice(idx).replace(/보정[결과만]*:/, '').trim().split('\n')[0].trim();
-    return fullDecoded.trim().split('\n').slice(-1)[0].trim();
-  } catch {
-    return '';
-  }
-}
-</script>
 </body>
 </html>
