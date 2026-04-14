@@ -14,6 +14,8 @@ let envConfigured = false;
 export function ensureHFEnvironment() {
   if (envConfigured) return;
   env.allowLocalModels = false;
+  try { env.useBrowserCache = true; } catch {}
+  try { env.useFSCache = false; } catch {}
   try {
     env.backends.onnx.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 1));
   } catch {}

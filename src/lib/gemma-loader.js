@@ -334,6 +334,29 @@ export async function runGemmaTextCorrection({
   };
 }
 
+export async function runGemmaPrompt({
+  processor,
+  model,
+  promptText,
+  maxNewTokens = 128,
+  doSample = false,
+  temperature = 0.1,
+}) {
+  const {formattedPrompt, inputs} = await buildGemmaInputs(processor, promptText);
+  const startedAt = performance.now();
+  const outputs = await model.generate({
+    ...inputs,
+    max_new_tokens: maxNewTokens,
+    do_sample: doSample,
+    temperature,
+  });
+  const text = extractGemmaOutputText(processor, outputs, inputs, formattedPrompt);
+  return {
+    text,
+    latencyMs: Math.round(performance.now() - startedAt),
+  };
+}
+
 function emitLog(onLog, level, message, detail = '') {
   if (!onLog) return;
   onLog({

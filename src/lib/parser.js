@@ -7,6 +7,7 @@ const ARABIC_NUMBER_RE = /^\d+(?:\.\d+)?$/;
 const DECIMAL_INCOMPLETE_RE = /^(.+?)(?:점|\.)$/;
 const EXPLICIT_CORRECTION_RE = /^(수정|정정)\s+(.+)$/;
 const NOTE_ALIASES = ['비고', '메모', '참고', '노트', '기타', '비고란'];
+const OVERWRITE_WINDOW_MS = 1500;
 
 const KOREAN_DIGITS = {
   영: 0, 공: 0, 일: 1, 이: 2, 삼: 3, 사: 4, 오: 5, 육: 6, 륙: 6, 칠: 7, 팔: 8, 구: 9,
@@ -264,6 +265,15 @@ function parseEnumValue(options, text) {
   return {kind: 'invalid'};
 }
 
+function parseBooleanValue(text) {
+  const normalized = fieldKey(text);
+  const truthy = ['예', '네', '응', '있음', '있다', 'true', 'on', '사용', '체크'];
+  const falsy = ['아니오', '아니', '없음', '없다', 'false', 'off', '해제'];
+  if (truthy.includes(normalized)) return {kind: 'value', value: true, parseKind: 'boolean-true'};
+  if (falsy.includes(normalized)) return {kind: 'value', value: false, parseKind: 'boolean-false'};
+  return {kind: 'invalid'};
+}
+
 function getPendingMs(field) {
   return PENDING_MS_BY_FIELD[field] || 1100;
 }
@@ -279,10 +289,11 @@ function createFieldCatalog(fields) {
         alias,
         aliasKey: fieldKey(alias),
         regex: buildAliasRegex(alias),
+        priority: meta.priority ?? 50,
       })),
     });
   }
-  entries.sort((a, b) => b.field.length - a.field.length);
+  entries.sort((a, b) => (b.meta.priority ?? 50) - (a.meta.priority ?? 50) || b.field.length - a.field.length);
   return entries;
 }
 
@@ -324,6 +335,7 @@ function matchFieldFuzzy(fields, input) {
       } else {
         score = similarity(key, alias.aliasKey);
       }
+      score += Math.min((entry.meta.priority ?? 50) / 1000, 0.15);
       if (score >= 0.55) {
         candidates.push({field: entry.field, alias: alias.alias, score: Number(score.toFixed(4)), method});
       }
@@ -341,6 +353,7 @@ function parseValueByType(meta, text) {
   if (meta.type === 'int') return parseIntegerValue(text);
   if (meta.type === 'float') return parseFloatValue(text);
   if (meta.type === 'enum') return parseEnumValue(meta.options, text);
+  if (meta.type === 'boolean') return parseBooleanValue(text);
   if (meta.type === 'text') {
     const normalized = normalizeTranscript(text);
     return normalized ? {kind: 'value', value: normalized, parseKind: 'text'} : {kind: 'empty'};
@@ -386,6 +399,33 @@ export class VoiceSurveyParser {
     this.lastNumericTarget = target ? {...target} : null;
   }
 
+  rankFieldCandidates(rawText, limit = 4) {
+    const normalized = normalizeTranscript(rawText);
+    const words = splitTokens(normalized);
+    const hits = [];
+    for (const entry of this.catalog) {
+      for (const alias of entry.aliases) {
+        if (fieldKey(normalized).includes(alias.aliasKey)) {
+          hits.push({field: entry.field, alias: alias.alias, score: 0.98 + Math.min(alias.priority / 1000, 0.12), method: 'contains-alias'});
+          continue;
+        }
+        for (let start = 0; start < words.length; start++) {
+          for (let len = 1; len <= Math.min(3, words.length - start); len++) {
+            const sample = words.slice(start, start + len).join(' ');
+            const match = matchFieldFuzzy(this.fields, sample);
+            if (match.field === entry.field && match.score >= 0.7) {
+              hits.push({field: entry.field, alias: match.alias || alias.alias, score: match.score, method: match.method});
+            }
+          }
+        }
+      }
+    }
+    return hits
+      .sort((a, b) => b.score - a.score)
+      .filter((item, index, list) => list.findIndex((other) => other.field === item.field) === index)
+      .slice(0, limit);
+  }
+
   parseUtterance(rawText, {commit = true, now = Date.now()} = {}) {
     const normalizedText = normalizeTranscript(rawText);
     if (!normalizedText) return null;
@@ -410,7 +450,7 @@ export class VoiceSurveyParser {
     if (fuzzy) return fuzzy;
 
     const fieldOnly = matchFieldFuzzy(this.fields, normalizedText);
-    if (fieldOnly.field && fieldOnly.score >= 0.74) {
+    if (fieldOnly.field && fieldOnly.score >= 0.82 && (this.fields[fieldOnly.field]?.priority ?? 0) >= 100) {
       const pendingInfo = this.makePending(fieldOnly.field, now, 'value');
       if (commit) this.pendingField = pendingInfo;
       return buildCandidate({
@@ -448,6 +488,18 @@ export class VoiceSurveyParser {
     if (meta.type === 'int' && !Number.isInteger(value)) {
       return {severity: 'fail', message: '정수 항목입니다'};
     }
+    if (meta.allowedValues?.length) {
+      const normalizedAllowed = meta.allowedValues.map((item) => String(item));
+      if (!normalizedAllowed.includes(String(value))) {
+        return {severity: 'reconfirm', message: `${field} 허용값 외 입력`};
+      }
+    }
+    if (meta.type === 'enum' && meta.options?.length && !meta.options.includes(value)) {
+      return {severity: 'reconfirm', message: `${field} 허용 선택지 외 입력`};
+    }
+    if (meta.type === 'boolean' && typeof value !== 'boolean') {
+      return {severity: 'fail', message: '예/아니오만 허용됩니다'};
+    }
     const rules = meta.validation;
     if (!rules || typeof value !== 'number') return {severity: 'ok', message: ''};
 
@@ -471,7 +523,7 @@ export class VoiceSurveyParser {
   expireState(now) {
     if (this.pendingField && this.pendingField.expiresAt <= now) this.pendingField = null;
     if (this.noteMode && this.noteMode.expiresAt <= now) this.noteMode = null;
-    if (this.lastNumericTarget && now - this.lastNumericTarget.setAt > 60000) this.lastNumericTarget = null;
+    if (this.lastNumericTarget && now - this.lastNumericTarget.setAt > OVERWRITE_WINDOW_MS) this.lastNumericTarget = null;
   }
 
   makePending(field, now, kind, extra = {}) {
@@ -485,15 +537,18 @@ export class VoiceSurveyParser {
   }
 
   parseDirectNote(rawText, normalizedText, now, commit) {
-    const fuzzyNote = NOTE_ALIASES.find((alias) => fieldKey(normalizedText) === fieldKey(alias));
+    const noteEntries = this.catalog.filter((entry) => entry.meta.noteField || entry.field === '비고');
+    const noteAliases = noteEntries.flatMap((entry) => [entry.field, ...(entry.meta.aliases || []), ...(entry.meta.short ? [entry.meta.short] : [])]);
+    const fuzzyNote = noteAliases.find((alias) => fieldKey(normalizedText) === fieldKey(alias));
     if (fuzzyNote) {
-      const noteMode = {field: '비고', setAt: now, expiresAt: now + 15000};
+      const targetField = noteEntries.find((entry) => [entry.field, entry.meta.short, ...(entry.meta.aliases || [])].filter(Boolean).some((alias) => fieldKey(alias) === fieldKey(fuzzyNote)))?.field || '비고';
+      const noteMode = {field: targetField, setAt: now, expiresAt: now + 15000};
       if (commit) this.noteMode = noteMode;
       return buildCandidate({
         rawText,
         normalizedText,
         rawField: fuzzyNote,
-        field: '비고',
+        field: targetField,
         value: null,
         matchScore: 1,
         matchMethod: 'note-mode-enter',
@@ -502,7 +557,8 @@ export class VoiceSurveyParser {
       });
     }
 
-    for (const alias of NOTE_ALIASES) {
+    for (const entry of noteEntries) {
+      for (const alias of [entry.field, entry.meta.short, ...(entry.meta.aliases || [])].filter(Boolean)) {
       const regex = buildAliasRegex(alias);
       const match = normalizedText.match(regex);
       if (!match) continue;
@@ -513,21 +569,23 @@ export class VoiceSurveyParser {
         rawText,
         normalizedText,
         rawField: alias,
-        field: '비고',
+        field: entry.field,
         value: suffix,
-        matchScore: alias === '비고' ? 1 : 0.98,
+        matchScore: alias === entry.field ? 1 : 0.98,
         matchMethod: 'note-direct',
         parseKind: 'text',
       });
+      }
     }
 
     if (this.noteMode) {
+      const noteMode = {...this.noteMode};
       if (commit) this.noteMode = null;
       return buildCandidate({
         rawText,
         normalizedText,
         rawField: '[비고모드]',
-        field: '비고',
+        field: noteMode.field,
         value: normalizedText,
         matchScore: 0.96,
         matchMethod: 'note-followup',
@@ -564,6 +622,7 @@ export class VoiceSurveyParser {
 
   parseFieldPrefix(rawText, normalizedText, now, commit, bypassState = false) {
     const candidates = [];
+    const compactText = fieldKey(normalizedText);
 
     for (const entry of this.catalog) {
       for (const alias of entry.aliases) {
@@ -596,7 +655,7 @@ export class VoiceSurveyParser {
             rawField: alias.alias,
             field: entry.field,
             value: valueResult.value,
-            matchScore: (alias.alias === entry.field ? 0.995 : 0.98) - aliasPenalty,
+            matchScore: (alias.alias === entry.field ? 0.995 : 0.98) - aliasPenalty + Math.min((entry.meta.priority ?? 50) / 1000, 0.12),
             matchMethod: suffixRaw.includes(' ') ? 'prefix-value' : 'attached-value',
             parseKind: valueResult.parseKind,
             candidates: matchCandidates,
@@ -609,13 +668,15 @@ export class VoiceSurveyParser {
             rawField: alias.alias,
             field: entry.field,
             value: null,
-            matchScore: 0.97 - aliasPenalty,
+            matchScore: 0.97 - aliasPenalty + Math.min((entry.meta.priority ?? 50) / 1000, 0.12),
             matchMethod: 'pending-set:decimal-incomplete',
             parseKind: valueResult.parseKind,
             candidates: matchCandidates,
             pending: this.makePending(entry.field, now, 'decimal-incomplete', {integerPart: valueResult.integerPart}),
           }));
         }
+
+        if (!compactText.includes(alias.aliasKey)) continue;
       }
     }
 
@@ -670,7 +731,9 @@ export class VoiceSurveyParser {
     }
 
     const numericOnly = parseFloatValue(normalizedText);
-    if (numericOnly.kind === 'value' && this.lastNumericTarget) {
+    if (numericOnly.kind === 'value' && this.lastNumericTarget && now - this.lastNumericTarget.setAt <= OVERWRITE_WINDOW_MS && !NOISE_NUMBER_RE.test(String(normalizedText).replace(/[^\d]/g, ''))) {
+      const validation = this.validateValue(this.lastNumericTarget.field, numericOnly.value);
+      if (validation.severity === 'ok' || validation.severity === 'warn') {
       return buildCandidate({
         rawText,
         normalizedText,
@@ -682,6 +745,7 @@ export class VoiceSurveyParser {
         replacesLogId: this.lastNumericTarget.logId,
         parseKind: numericOnly.parseKind,
       });
+      }
     }
 
     if (numericOnly.kind === 'value') {
@@ -705,38 +769,42 @@ export class VoiceSurveyParser {
     if (words.length < 2) return null;
     const candidates = [];
 
-    for (let take = 1; take <= Math.min(words.length - 1, 4); take++) {
-      const fieldText = words.slice(0, -take).join(' ');
-      const valueText = words.slice(-take).join('');
-      const fieldMatch = matchFieldFuzzy(this.fields, fieldText);
-      if (!fieldMatch.field || fieldMatch.score < 0.72) continue;
-      const meta = this.fields[fieldMatch.field];
-      const parsedValue = parseValueByType(meta, valueText);
-      if (parsedValue.kind === 'value') {
-        candidates.push(buildCandidate({
-          rawText,
-          normalizedText,
-          rawField: fieldText,
-          field: fieldMatch.field,
-          value: parsedValue.value,
-          matchScore: Number(fieldMatch.score.toFixed(4)),
-          matchMethod: `fuzzy-value:${fieldMatch.method}`,
-          parseKind: parsedValue.parseKind,
-          candidates: fieldMatch.candidates,
-        }));
-      } else if (parsedValue.kind === 'decimal-incomplete') {
-        candidates.push(buildCandidate({
-          rawText,
-          normalizedText,
-          rawField: fieldText,
-          field: fieldMatch.field,
-          value: null,
-          matchScore: Number(fieldMatch.score.toFixed(4)),
-          matchMethod: `pending-set:decimal-fuzzy:${fieldMatch.method}`,
-          parseKind: parsedValue.parseKind,
-          candidates: fieldMatch.candidates,
-          pending: this.makePending(fieldMatch.field, now, 'decimal-incomplete', {integerPart: parsedValue.integerPart}),
-        }));
+    for (let start = 0; start < words.length - 1; start++) {
+      for (let take = 1; take <= Math.min(words.length - start - 1, 3); take++) {
+        const fieldText = words.slice(start, start + take).join(' ');
+        const valueText = words.slice(start + take).join('');
+        const fieldMatch = matchFieldFuzzy(this.fields, fieldText);
+        if (!fieldMatch.field || fieldMatch.score < 0.72) continue;
+        const meta = this.fields[fieldMatch.field];
+        const parsedValue = parseValueByType(meta, valueText);
+        if (parsedValue.kind === 'value') {
+          const validation = this.validateValue(fieldMatch.field, parsedValue.value);
+          if (validation.severity === 'reconfirm' && meta.allowedValues?.length) continue;
+          candidates.push(buildCandidate({
+            rawText,
+            normalizedText,
+            rawField: fieldText,
+            field: fieldMatch.field,
+            value: parsedValue.value,
+            matchScore: Number(fieldMatch.score.toFixed(4)),
+            matchMethod: `fuzzy-value:${fieldMatch.method}`,
+            parseKind: parsedValue.parseKind,
+            candidates: fieldMatch.candidates,
+          }));
+        } else if (parsedValue.kind === 'decimal-incomplete') {
+          candidates.push(buildCandidate({
+            rawText,
+            normalizedText,
+            rawField: fieldText,
+            field: fieldMatch.field,
+            value: null,
+            matchScore: Number(fieldMatch.score.toFixed(4)),
+            matchMethod: `pending-set:decimal-fuzzy:${fieldMatch.method}`,
+            parseKind: parsedValue.parseKind,
+            candidates: fieldMatch.candidates,
+            pending: this.makePending(fieldMatch.field, now, 'decimal-incomplete', {integerPart: parsedValue.integerPart}),
+          }));
+        }
       }
     }
 

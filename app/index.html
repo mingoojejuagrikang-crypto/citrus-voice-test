@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>감귤조사 v6.3 - 현장 음성 파서</title>
+<title>감귤조사 v7.0 - 스키마 기반 현장 입력</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -77,6 +77,15 @@
   .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
   .tiny{font-size:10px;color:var(--txm);line-height:1.5}
   textarea{width:100%;border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;padding:9px;resize:vertical;min-height:66px}
+  .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+  .tab-btn{padding:10px 8px;border:1px solid var(--bd);border-radius:8px;background:var(--sf);color:var(--txm);font-size:11px;font-weight:900;text-align:center;cursor:pointer}
+  .tab-btn.active{background:var(--sf2);color:var(--ac);border-color:var(--ac)}
+  .tab-pane{display:none}
+  .tab-pane.active{display:block}
+  .schema-actions{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .schema-card{background:var(--sf2);border-radius:8px;padding:9px 10px;border:1px solid var(--bd);margin-bottom:8px}
+  .kv{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 </style>
 </head>
 <body>
@@ -86,22 +95,29 @@
 </div>
 <div class="app">
   <div class="hdr">
-    <h1>감귤조사 v6.3</h1>
-    <div class="ver">즉시 출력 + 붙여말하기 복구 + 비고 LLM 실험 + 사용자 정의 항목</div>
+    <h1>감귤조사 v7.0</h1>
+    <div class="ver">스키마 기반 입력 + 규칙 파서 우선 + LLM 후보정</div>
   </div>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="input" onclick="window.switchTab(this.dataset.tab)">입력</button>
+    <button class="tab-btn" data-tab="schema" onclick="window.switchTab(this.dataset.tab)">항목 설정</button>
+    <button class="tab-btn" data-tab="models" onclick="window.switchTab(this.dataset.tab)">모델 상태</button>
+    <button class="tab-btn" data-tab="logs" onclick="window.switchTab(this.dataset.tab)">로그</button>
+  </div>
+
+  <div class="tab-pane active" id="tab-input">
   <div class="panel">
     <div class="grid">
       <label>인식 엔진
         <select id="engineSelect" onchange="window.changeEngine(this.value)">
-          <option value="webspeech">Web Speech 빠른 모드</option>
-          <option value="webspeech-gemma">Web Speech + Gemma 비고 정리 실험</option>
-          <option value="whisper-tiny">Whisper tiny 비추천</option>
-          <option value="whisper-base">Whisper base 비추천</option>
+          <option value="webspeech">Web Speech 기본</option>
+          <option value="webspeech-gemma">Web Speech + LLM 후보정</option>
         </select>
       </label>
       <label>VAD 감도
         <select id="modeSelect" onchange="window.changeVadMode(this.value)">
-          <option value="fast">빠른 반응</option>
+          <option value="fast">fast</option>
+          <option value="balanced">balanced</option>
           <option value="accurate">정확 우선</option>
         </select>
       </label>
@@ -115,50 +131,31 @@
         </select>
       </label>
       <label>현장 메모
-        <div class="tiny" style="padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--sf2)">일반 항목은 규칙 기반, 비고만 LLM 정리</div>
+        <div class="tiny" style="padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--sf2)">일반 항목은 규칙 파서 우선, 실패/모호 시 LLM 후보정</div>
       </label>
     </div>
-    <div id="gemmaModelRow" style="margin-top:8px;display:none">
-      <label>비고용 Gemma 모델
+    <div id="gemmaModelRow" style="margin-top:8px;display:block">
+      <label>LLM 모델
         <select id="gemmaModelSelect" onchange="window.changeGemmaModel(this.value)">
           <option value="gemma-4-e2b">Gemma 4 E2B (~500MB, 자동 최적화)</option>
         </select>
       </label>
     </div>
   </div>
-  <button class="btn" id="btnCustomToggle" onclick="window.toggleCustomPanel()" style="width:100%;margin-bottom:8px;font-size:11px">⚙ 항목 추가/관리</button>
-  <div class="panel" id="customPanel" style="display:none">
-    <div style="font-size:12px;color:var(--txm);font-weight:700;margin-bottom:8px">사용자 정의 항목 추가</div>
-    <div style="display:grid;grid-template-columns:2fr 1fr;gap:6px;margin-bottom:6px">
-      <input id="cfName" placeholder="항목명 (예: 엽록소)" type="text" style="font-size:12px">
-      <select id="cfType" style="font-size:12px">
-        <option value="float">소수</option>
-        <option value="int">정수</option>
-        <option value="text">텍스트</option>
-        <option value="enum">선택형</option>
-      </select>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
-      <input id="cfMin" placeholder="최소값" type="number" style="font-size:12px">
-      <input id="cfMax" placeholder="최대값" type="number" style="font-size:12px">
-      <input id="cfShort" placeholder="약칭" type="text" style="font-size:12px">
-    </div>
-    <div class="subgrid">
-      <input id="cfExample" placeholder="예시 발화 (예: 착색도 삼)" type="text" style="font-size:12px">
-      <input id="cfOptions" placeholder="선택형 옵션 (예: 상,중,하)" type="text" style="font-size:12px">
-    </div>
-    <textarea id="cfAliases" placeholder="추가 alias가 있으면 쉼표로 입력. 비워두면 규칙 기반 후보 자동 생성"></textarea>
-    <button class="btn" onclick="window.addCustomField()" style="width:100%;margin-bottom:8px">항목 추가</button>
-    <div id="customFieldList" style="font-size:11px;color:var(--txd)">추가된 항목 없음</div>
-  </div>
   <div class="model-status" id="modelStatus">
-    iPhone Safari에서는 Web Speech 빠른 모드를 기본으로 사용하세요. Whisper는 비교용입니다.
+    앱 시작 시 LLM 준비 상태를 확인합니다. 실제 runtime ready가 아닐 때는 후보정에 사용하지 않습니다.
     <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
   </div>
-  <div class="model-log" id="modelLog"></div>
   <div class="status">
     <div class="dot ok" id="dot"></div>
     <span id="statusText">시작 대기</span>
+  </div>
+  <div class="schema-card">
+    <div class="live-head"><span>입력 컨텍스트</span><span id="llmBadge">LLM 대기</span></div>
+    <div class="kv">
+      <div class="tiny">pending field<br><b id="pendingFieldText" style="color:var(--tx)">없음</b></div>
+      <div class="tiny">LLM 상태<br><b id="llmStateText" style="color:var(--tx)">확인 전</b></div>
+    </div>
   </div>
   <div class="live-box interim" id="liveBox">
     <div class="live-head">
@@ -177,19 +174,108 @@
   </div>
   <div class="results" id="results">
     <div class="empty" id="empty">
-      iPhone Safari 기본값은 Web Speech 빠른 모드입니다.<br>
-      interim으로 먼저 보여주고 final에서 보정합니다.<br>
-      일반 항목은 규칙 기반, 비고만 LLM 정리 대상입니다.<br>
-      TTS 중에 말하면 즉시 중단하고 인식합니다 (바지인).
+      기본 모드는 balanced입니다.<br>
+      interim을 먼저 보여주고 final에서 스키마 검증 후 확정합니다.<br>
+      비고는 note mode로 길게 수집하고, LLM 준비 시 정리본을 추가합니다.
     </div>
+  </div>
+  </div>
+
+  <div class="tab-pane" id="tab-schema">
+  <div class="panel" id="customPanel">
+    <div style="font-size:12px;color:var(--txm);font-weight:700;margin-bottom:8px">항목 스키마 편집</div>
+    <div class="schema-actions">
+      <button class="btn" onclick="window.resetSchemaPreset()">프리셋 초기화</button>
+      <button class="btn" onclick="window.cancelSchemaEdit()">편집 취소</button>
+    </div>
+    <div class="tiny" id="schemaEditLabel" style="margin-bottom:8px">새 항목 추가</div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:6px;margin-bottom:6px">
+      <input id="cfName" placeholder="항목명 (예: 엽록소)" type="text" style="font-size:12px">
+      <select id="cfType" style="font-size:12px">
+        <option value="float">소수</option>
+        <option value="int">정수</option>
+        <option value="text">텍스트</option>
+        <option value="enum">선택형</option>
+        <option value="boolean">boolean</option>
+      </select>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
+      <input id="cfMin" placeholder="최소값" type="number" style="font-size:12px">
+      <input id="cfMax" placeholder="최대값" type="number" style="font-size:12px">
+      <input id="cfShort" placeholder="약칭" type="text" style="font-size:12px">
+    </div>
+    <div class="subgrid">
+      <input id="cfExample" placeholder="예시 발화 (예: 착색도 삼)" type="text" style="font-size:12px">
+      <input id="cfOptions" placeholder="선택형/허용값 (예: 상,중,하 또는 1,2,3)" type="text" style="font-size:12px">
+    </div>
+    <div class="subgrid">
+      <input id="cfWarnMax" placeholder="주의 상한 (예: 200)" type="number" style="font-size:12px">
+      <input id="cfPriority" placeholder="우선순위 (기본 70)" type="number" style="font-size:12px">
+    </div>
+    <label style="margin-top:6px">
+      <span>alias 목록</span>
+      <textarea id="cfAliases" placeholder="추가 alias가 있으면 쉼표로 입력. 비워두면 규칙 기반 후보 자동 생성"></textarea>
+    </label>
+    <label style="margin-top:6px">
+      <span>비고 / 자유문장 항목</span>
+      <select id="cfNoteField" style="font-size:12px">
+        <option value="false">아니오</option>
+        <option value="true">예</option>
+      </select>
+    </label>
+    <button class="btn" onclick="window.addCustomField()" style="width:100%;margin-bottom:8px" id="schemaSubmitBtn">항목 추가</button>
+    <div id="customFieldList" style="font-size:11px;color:var(--txd)">추가된 항목 없음</div>
+  </div>
+  </div>
+
+  <div class="tab-pane" id="tab-models">
+  <div class="panel">
+    <div class="schema-card">
+      <div class="live-head"><span>LLM 설정</span><span class="mono" id="cacheStateText">cache unknown</span></div>
+      <div class="subgrid">
+        <label>후보정 활성화
+          <select id="llmEnableSelect" onchange="window.changeLlmEnabled(this.value)">
+            <option value="true">enabled</option>
+            <option value="false">disabled</option>
+          </select>
+        </label>
+        <label>앱 시작 시 preload
+          <select id="llmPreloadSelect" onchange="window.changeLlmPreload(this.value)">
+            <option value="true">preload</option>
+            <option value="false">manual</option>
+          </select>
+        </label>
+      </div>
+      <div class="kv">
+        <div class="tiny">설정 enabled<br><b id="llmEnabledText" style="color:var(--tx)">-</b></div>
+        <div class="tiny">runtime ready<br><b id="llmRuntimeText" style="color:var(--tx)">-</b></div>
+      </div>
+    </div>
+    <div class="schema-actions">
+      <button class="btn" id="btnLoad" onclick="window.loadModel()">LLM 로드</button>
+      <button class="btn" onclick="window.clearModelMetadata()">메타데이터 초기화</button>
+    </div>
+    <div class="model-log" id="modelLog"></div>
+    <div class="tiny" id="modelDiagText">Whisper는 기본 엔진에서 숨김 처리됩니다. Gemma는 준비 가능할 때만 후보정에 사용됩니다.</div>
+  </div>
+  </div>
+
+  <div class="tab-pane" id="tab-logs">
+  <div class="panel">
+    <div class="schema-actions">
+      <button class="btn" onclick="window.downloadLogs('json')">JSON</button>
+      <button class="btn" onclick="window.downloadLogs('csv')">CSV</button>
+      <button class="btn" onclick="window.clearResults()">화면 초기화</button>
+    </div>
+    <div class="model-log" id="logConsole" style="display:block;max-height:360px">로그가 여기에 표시됩니다.</div>
+  </div>
   </div>
 </div>
 <div class="controls" id="controls">
-  <button class="btn" id="btnLoad" onclick="window.loadModel()" style="display:none">모델 로드</button>
   <button class="btn primary" id="btnStart" onclick="window.toggleCapture()">시작</button>
-  <button class="btn" onclick="window.downloadLogs('json')">JSON</button>
-  <button class="btn" onclick="window.downloadLogs('csv')">CSV</button>
-  <button class="btn" onclick="window.clearResults()">초기화</button>
+  <button class="btn" onclick="window.switchTab('schema')">항목</button>
+  <button class="btn" onclick="window.switchTab('models')">모델</button>
+  <button class="btn" onclick="window.switchTab('logs')">로그</button>
 </div>
 <div class="toast" id="toast"><div class="tf" id="toastF"></div><div class="tv" id="toastV"></div></div>
 <script type="module">
@@ -198,6 +284,7 @@ import {
   createFieldRegistry,
   generateAliasSuggestions,
   normalizeCustomFieldDefinition,
+  serializeFieldSchema,
 } from '../src/lib/field-config.js';
 import {
   GEMMA_DEFAULT_MODEL_KEY,
@@ -206,12 +293,12 @@ import {
   getGemmaConfig,
   getGemmaRuntimeDiagnostics,
   loadGemmaRuntime,
-  runGemmaTextCorrection,
+  runGemmaPrompt,
   sanitizeGemmaModelKey,
 } from '../src/lib/gemma-loader.js';
 import { VoiceSurveyParser } from '../src/lib/parser.js';
 
-const APP_VERSION = 'v6.3.0';
+const APP_VERSION = 'v7.0.0';
 const LOG_KEY = 'citrus_voice_feedback_logs_v6';
 const PREF_KEY = 'citrus_voice_prefs_v6';
 const CUSTOM_FIELDS_KEY = 'citrus_custom_fields_v6';
@@ -223,8 +310,8 @@ let totalRecognitionCount = 0;
 
 // Model configs
 const MODEL_CONFIGS = {
-  'whisper-tiny': {label: 'Whisper tiny', modelId: 'onnx-community/whisper-tiny', dtype: 'q8'},
-  'whisper-base': {label: 'Whisper base', modelId: 'onnx-community/whisper-base', dtype: 'q8'},
+  'whisper-tiny': {label: 'Whisper tiny', modelId: 'onnx-community/whisper-tiny', dtype: 'q8', hidden: true},
+  'whisper-base': {label: 'Whisper base', modelId: 'onnx-community/whisper-base', dtype: 'q8', hidden: true},
 };
 const GEMMA_ALIAS_HINTS = [
   '변경=횡경', '행경=횡경', '은경=횡경', '엔경=횡경',
@@ -238,16 +325,21 @@ function getGemmaModelId(modelKey = gemmaModelKey) {
 }
 
 const VAD_MODES = {
-  fast:    {label: '빠른 반응', silenceMs: 800,  minMs: 320, maxMs: 5200, preRollMs: 380},
-  accurate:{label: '정확 우선', silenceMs: 980, minMs: 420, maxMs: 7200, preRollMs: 560},
+  fast:    {label: 'fast', silenceMs: 760,  minMs: 300, maxMs: 5000, preRollMs: 340},
+  balanced:{label: 'balanced', silenceMs: 1180, minMs: 360, maxMs: 6200, preRollMs: 460},
+  accurate:{label: 'accurate', silenceMs: 1620, minMs: 460, maxMs: 7600, preRollMs: 640},
 };
 
 // State
 let prefs = loadPrefs();
 let engineMode   = prefs.engineMode   || 'webspeech';
-let vadMode      = prefs.vadMode      || 'fast';
+let vadMode      = prefs.vadMode      || 'balanced';
 let gemmaModelKey = prefs.gemmaModelKey || GEMMA_DEFAULT_MODEL_KEY;
 let ttsRate = Number(prefs.ttsRate || 0.95);
+let llmEnabled = prefs.llmEnabled !== false;
+let llmPreload = prefs.llmPreload !== false;
+let activeTab = prefs.activeTab || 'input';
+let schemaEditingName = null;
 
 // Whisper state
 let transcriber   = null;
@@ -282,6 +374,7 @@ let feedbackLogs       = loadLogs();
 let statOk = 0;
 let statFail = 0;
 let lastLatency = '-';
+let lastInterimText = '';
 
 // TTS barge-in state (replaces ttsBlockedUntil)
 let lastTtsText = '';
@@ -334,6 +427,8 @@ function getSessionInfo() {
     sessionId:        SESSION_ID,
     engineMode,
     vadMode,
+    llmEnabled,
+    llmRuntimeReady:  gemmaLoaded,
     gemmaEnabled:     gemmaLoaded && engineMode === 'webspeech-gemma',
     gemmaModelId:     (gemmaLoaded && engineMode === 'webspeech-gemma') ? getGemmaModelId() : null,
     customFieldCount: Object.keys(customFields).length,
@@ -352,18 +447,31 @@ function getSessionInfo() {
 })();
 
 // Init UI
+if (![...document.getElementById('engineSelect').options].some((option) => option.value === engineMode)) {
+  engineMode = 'webspeech';
+}
+if (![...document.getElementById('modeSelect').options].some((option) => option.value === vadMode)) {
+  vadMode = 'balanced';
+}
 document.getElementById('engineSelect').value = engineMode;
 document.getElementById('modeSelect').value   = vadMode;
 document.getElementById('ttsRateSelect').value = String(ttsRate.toFixed(2));
+document.getElementById('llmEnableSelect').value = String(llmEnabled);
+document.getElementById('llmPreloadSelect').value = String(llmPreload);
 const gms = document.getElementById('gemmaModelSelect');
 if (gms) {
   if ([...gms.options].some(o => o.value === gemmaModelKey)) gms.value = gemmaModelKey;
 }
+switchTab(activeTab);
 syncControls();
 updateStats();
 renderCustomFieldList();
+renderLogConsole();
 if (prefs._needsResave) savePrefs();
 refreshGemmaAvailability();
+if (llmEnabled && llmPreload) {
+  queueMicrotask(() => { maybeWarmLlm('startup').catch(() => {}); });
+}
 
 // ---- Prefs / Storage ----
 function loadPrefs() {
@@ -375,14 +483,17 @@ function loadPrefs() {
       ...parsed,
       gemmaModelKey,
       ttsRate: parsed.ttsRate ?? 0.95,
+      llmEnabled: parsed.llmEnabled ?? true,
+      llmPreload: parsed.llmPreload ?? true,
+      activeTab: parsed.activeTab || 'input',
       _needsResave: gemmaModelKey !== storedGemma || Object.prototype.hasOwnProperty.call(parsed, 'gemmaModelId'),
     };
   } catch {
-    return {gemmaModelKey: GEMMA_DEFAULT_MODEL_KEY, ttsRate: 0.95, _needsResave: false};
+    return {gemmaModelKey: GEMMA_DEFAULT_MODEL_KEY, ttsRate: 0.95, llmEnabled: true, llmPreload: true, activeTab: 'input', _needsResave: false};
   }
 }
 function savePrefs() {
-  localStorage.setItem(PREF_KEY, JSON.stringify({engineMode, vadMode, gemmaModelKey, ttsRate}));
+  localStorage.setItem(PREF_KEY, JSON.stringify({engineMode, vadMode, gemmaModelKey, ttsRate, llmEnabled, llmPreload, activeTab}));
 }
 function loadLogs() {
   try { const parsed = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
@@ -401,6 +512,7 @@ function saveCustomFields() {
 function rebuildFieldRegistry() {
   FIELDS = createFieldRegistry(customFields);
   parser.setFields(FIELDS);
+  renderCustomFieldList();
 }
 
 async function refreshGemmaAvailability() {
@@ -420,6 +532,9 @@ async function refreshGemmaAvailability() {
     recordSystemLog('gemma-webgpu-check-error', {error: e.message});
   }
   syncControls();
+  if (llmEnabled && llmPreload && gemmaAvailability?.supported && !gemmaLoaded && !gemmaLoading) {
+    maybeWarmLlm('availability-check').catch(() => {});
+  }
 }
 
 // ---- Utilities ----
@@ -434,6 +549,21 @@ function setStatus(type, text) {
   document.getElementById('dot').className = 'dot ' + type;
   document.getElementById('statusText').textContent = text;
 }
+function updateQuickStatus() {
+  const state = parser.getState();
+  document.getElementById('pendingFieldText').textContent = state.pendingField?.field || '없음';
+  const llmText = !llmEnabled
+    ? 'disabled'
+    : gemmaLoaded
+      ? `ready (${window._gemmaDevice || 'webgpu'})`
+      : gemmaLoading
+        ? 'loading'
+        : gemmaAvailability?.supported
+          ? 'available, not ready'
+          : gemmaAvailability?.reason || '확인 전';
+  document.getElementById('llmStateText').textContent = llmText;
+  document.getElementById('llmBadge').textContent = gemmaLoaded ? 'LLM ready' : llmEnabled ? 'LLM standby' : 'LLM off';
+}
 function setLiveResult(stage, text, meta = '', tone = 'interim') {
   const box = document.getElementById('liveBox');
   box.className = `live-box ${tone}`;
@@ -441,7 +571,14 @@ function setLiveResult(stage, text, meta = '', tone = 'interim') {
   document.getElementById('liveBadge').textContent = tone === 'final' ? '확정' : tone === 'pending' ? '대기' : '임시';
   document.getElementById('liveText').textContent = text || '말하는 도중 임시 텍스트가 여기 바로 보입니다.';
   document.getElementById('liveMeta').textContent = meta || '확정 전에는 임시 텍스트, 확정 후에는 필드와 값이 표시됩니다.';
+  updateQuickStatus();
 }
+window.switchTab = function(next) {
+  activeTab = next || 'input';
+  document.querySelectorAll('.tab-btn').forEach((el) => el.classList.toggle('active', el.dataset.tab === activeTab));
+  document.querySelectorAll('.tab-pane').forEach((el) => el.classList.toggle('active', el.id === `tab-${activeTab}`));
+  savePrefs();
+};
 function renderModelLog() {
   const box = document.getElementById('modelLog');
   if (!box) return;
@@ -466,11 +603,24 @@ function appendModelLog(message, detail = '') {
 function handleGemmaLogEntry(entry) {
   appendModelLog(entry.message, entry.detail || '');
 }
+function renderLogConsole() {
+  const box = document.getElementById('logConsole');
+  if (!box) return;
+  const logs = feedbackLogs.slice(-80).reverse().map((log) => {
+    if (log.kind === 'recognition') {
+      return `[${log.ts}] raw="${log.rawText}" | interim="${log.interimText || '-'}" | final=${log.parse?.field ?? '-'} ${log.parse?.value ?? ''} | rule=${log.parse?.matchMethod || '-'} | llm=${log.gemma?.resolvedField || log.gemma?.outputText || '-'} | status=${log.status}`;
+    }
+    return `[${log.ts}] ${log.kind} | ${JSON.stringify(log.detail || {})}`;
+  });
+  box.textContent = logs.length ? logs.join('\n') : '로그가 여기에 표시됩니다.';
+}
 function updateStats() {
   document.getElementById('statOk').textContent      = statOk;
   document.getElementById('statFail').textContent    = statFail;
   document.getElementById('statLatency').textContent = lastLatency;
   document.getElementById('statLogs').textContent    = feedbackLogs.length;
+  renderLogConsole();
+  updateQuickStatus();
 }
 
 // ---- UI sync ----
@@ -479,73 +629,62 @@ function syncControls() {
   const startBtn = document.getElementById('btnStart');
   const status   = document.getElementById('modelStatus');
   const gemmaRow = document.getElementById('gemmaModelRow');
-  const needsWhisper = engineMode.startsWith('whisper');
-  const needsGemma   = engineMode === 'webspeech-gemma';
   const gemmaCfg = getGemmaConfig(gemmaModelKey);
   const progressPct = gemmaRuntimeState?.progress?.percent ?? (gemmaLoaded ? 100 : 0);
+  const enabledLabel = llmEnabled ? 'enabled' : 'disabled';
+  document.getElementById('llmEnabledText').textContent = enabledLabel;
+  document.getElementById('llmRuntimeText').textContent = gemmaLoaded ? 'ready' : gemmaLoading ? 'loading' : 'not-ready';
+  document.getElementById('cacheStateText').textContent = `browser cache requested / last ready ${localStorage.getItem('citrus_llm_last_ready') || '-'}`;
+  document.getElementById('modelDiagText').textContent = `모델 ${gemmaCfg.modelId} | transformers ${gemmaRuntimeState.runtime?.version || '?'} | Whisper는 숨김 처리됨`;
+  gemmaRow.style.display = 'block';
 
-  gemmaRow.style.display = needsGemma ? 'block' : 'none';
-  loadBtn.style.display  = (needsWhisper || needsGemma) ? 'inline-block' : 'none';
   loadBtn.disabled = false;
   loadBtn.classList.remove('disabled');
 
-  if (!needsWhisper && !needsGemma) {
-    startBtn.classList.remove('disabled');
+  startBtn.classList.remove('disabled');
+  if (!llmEnabled) {
+    loadBtn.textContent = 'LLM 비활성화';
+    status.className = 'model-status';
+    status.innerHTML = `LLM 후보정이 비활성화되었습니다. 규칙 파서만 사용합니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">enabled=${enabledLabel} / runtime ready=${gemmaLoaded ? 'yes' : 'no'}</div><div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
+    setStatus('ok', '규칙 파서만 사용');
+  } else if (!gemmaAvailability) {
+    loadBtn.textContent = 'LLM 확인 중';
+    loadBtn.disabled = true;
+    loadBtn.classList.add('disabled');
+    status.className = 'model-status loading';
+    status.innerHTML = 'LLM용 WebGPU 지원 여부를 확인 중입니다.<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:20%"></div></div>';
+    setStatus('proc', 'LLM 지원 확인 중');
+  } else if (!gemmaAvailability.supported) {
+    loadBtn.textContent = 'LLM 사용 불가';
+    loadBtn.disabled = true;
+    loadBtn.classList.add('disabled');
+    status.className = 'model-status';
+    status.innerHTML = `이 환경에서는 LLM 후보정을 사용할 수 없습니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">이유: ${escapeHtml(gemmaAvailability.reason || 'WebGPU 미지원')}</div><div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
+    setStatus('ok', 'Web Speech 시작 가능 (LLM 불가)');
+  } else if (gemmaLoading || gemmaRuntimeState.status === GEMMA_LOAD_STATES.loading) {
+    loadBtn.textContent = 'LLM 로딩중';
+    loadBtn.disabled = true;
+    loadBtn.classList.add('disabled');
+    status.className = 'model-status loading';
+    status.innerHTML = `LLM 준비 중: ${escapeHtml(gemmaRuntimeState.stage || 'start')}<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(gemmaCfg.modelId)} | device ${escapeHtml(gemmaCfg.device)} | dtype ${escapeHtml(gemmaCfg.dtype)}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:${progressPct}%"></div></div>`;
+    setStatus('proc', 'LLM 준비 중');
+  } else if (gemmaLoaded) {
+    loadBtn.textContent = 'LLM 재로드';
     status.className = 'model-status ready';
-    status.innerHTML = 'iPhone Safari 기본값입니다. interim을 먼저 보여주고 final에서 보정합니다.<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>';
-    setStatus('ok', 'Web Speech 시작 가능');
-  } else if (needsGemma) {
-    startBtn.classList.remove('disabled');
-    if (!gemmaAvailability) {
-      loadBtn.textContent = 'Gemma 확인 중';
-      loadBtn.disabled = true;
-      loadBtn.classList.add('disabled');
-      status.className = 'model-status loading';
-      status.innerHTML = 'Gemma용 WebGPU 지원 여부를 확인 중입니다.<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:20%"></div></div>';
-      setStatus('proc', 'Gemma 지원 확인 중');
-    } else if (!gemmaAvailability.supported) {
-      loadBtn.textContent = 'Gemma 비활성화';
-      loadBtn.disabled = true;
-      loadBtn.classList.add('disabled');
-      status.className = 'model-status';
-      status.innerHTML = `Gemma는 비고 정리용 WebGPU 실험 기능입니다. 이 환경에서는 비활성화됩니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">이유: ${escapeHtml(gemmaAvailability.reason || 'WebGPU 미지원')}</div><div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
-      setStatus('ok', 'Web Speech 시작 가능 (Gemma 비활성화)');
-    } else if (gemmaLoading || gemmaRuntimeState.status === GEMMA_LOAD_STATES.loading) {
-      loadBtn.textContent = 'Gemma 로딩중';
-      loadBtn.disabled = true;
-      loadBtn.classList.add('disabled');
-      status.className = 'model-status loading';
-      status.innerHTML = `Gemma 로드 중: ${escapeHtml(gemmaRuntimeState.stage || 'start')}<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(gemmaCfg.modelId)} | device ${escapeHtml(gemmaCfg.device)} | dtype ${escapeHtml(gemmaCfg.dtype)}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:${progressPct}%"></div></div>`;
-      setStatus('proc', 'Gemma 로딩 중');
-    } else if (gemmaLoaded) {
-      loadBtn.textContent = 'Gemma 재로드';
-      status.className = 'model-status ready';
-      status.innerHTML = `Gemma 비고 정리 준비 완료. 일반 항목은 규칙 기반으로 처리됩니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(getGemmaModelId())} | device ${escapeHtml(window._gemmaDevice || gemmaCfg.device)} | dtype ${escapeHtml(window._gemmaDtype || gemmaCfg.dtype)}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>`;
-      setStatus('ok', 'Web Speech + Gemma 비고 정리 시작 가능');
-    } else if (gemmaRuntimeState.status === GEMMA_LOAD_STATES.failed) {
-      loadBtn.textContent = 'Gemma 재시도';
-      status.className = 'model-status error';
-      status.innerHTML = `Gemma 비고 정리 로드 실패. 일반 음성 입력은 계속 사용할 수 있습니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">상세: ${escapeHtml(gemmaRuntimeState.error?.message || '알 수 없는 오류')}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:${progressPct}%"></div></div>`;
-      setStatus('ok', 'Web Speech 시작 가능 (Gemma 실패)');
-    } else {
-      loadBtn.textContent = 'Gemma 로드';
-      status.className = 'model-status';
-      status.innerHTML = `Gemma는 비고 정리 전용 실험 기능입니다. 일반 항목 파서는 LLM 없이 동작합니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(gemmaCfg.modelId)} | device ${escapeHtml(gemmaCfg.device)} | dtype ${escapeHtml(gemmaCfg.dtype)} | transformers ${escapeHtml(gemmaRuntimeState.runtime?.version || '?')}</div><div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
-      setStatus('ok', 'Web Speech 시작 가능 (Gemma 미로드)');
-    }
+    status.innerHTML = `LLM 준비 완료. 규칙 파서 실패/모호 시에만 후보정합니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(getGemmaModelId())} | device ${escapeHtml(window._gemmaDevice || gemmaCfg.device)} | dtype ${escapeHtml(window._gemmaDtype || gemmaCfg.dtype)}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>`;
+    setStatus('ok', 'LLM ready');
+  } else if (gemmaRuntimeState.status === GEMMA_LOAD_STATES.failed) {
+    loadBtn.textContent = 'LLM 재시도';
+    status.className = 'model-status error';
+    status.innerHTML = `LLM 준비 실패. 규칙 파서만 계속 사용합니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">상세: ${escapeHtml(gemmaRuntimeState.error?.message || '알 수 없는 오류')}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:${progressPct}%"></div></div>`;
+    setStatus('ok', '규칙 파서 사용 중 (LLM 실패)');
   } else {
-    startBtn.classList.toggle('disabled', !(modelLoaded && activeModelKey === engineMode));
-    loadBtn.textContent = '모델 로드';
-    if (modelLoaded && activeModelKey === engineMode) {
-      const cfg = MODEL_CONFIGS[engineMode];
-      status.className = 'model-status ready';
-      status.innerHTML = `${cfg.label} 로드 완료. 시작할 수 있습니다.<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:100%"></div></div>`;
-    } else {
-      const cfg = MODEL_CONFIGS[engineMode];
-      status.className = 'model-status';
-      status.innerHTML = `${cfg.label} 모델을 먼저 로드하세요. 로드 후 짧은 warm-up을 수행합니다.<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
-    }
+    loadBtn.textContent = 'LLM 로드';
+    status.className = 'model-status';
+    status.innerHTML = `LLM 후보정은 enabled 상태입니다. 실제 ready가 될 때만 사용합니다.<div style="margin-top:6px;font-size:11px;color:var(--txm)">설정 enabled / runtime ready 분리 표시</div><div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
+    setStatus('ok', 'Web Speech 시작 가능');
   }
+  updateQuickStatus();
 }
 
 // ---- Engine controls ----
@@ -554,6 +693,7 @@ window.changeEngine = function(next) {
   engineMode = next;
   savePrefs();
   syncControls();
+  if (engineMode === 'webspeech-gemma' && llmEnabled && llmPreload) maybeWarmLlm('engine-change').catch(() => {});
 };
 window.changeVadMode = function(next) {
   vadMode = next;
@@ -565,6 +705,16 @@ window.changeTtsRate = function(next) {
   savePrefs();
   setStatus('ok', `TTS 속도 ${ttsRate.toFixed(2)}`);
 };
+window.changeLlmEnabled = function(next) {
+  llmEnabled = next === 'true';
+  savePrefs();
+  syncControls();
+  if (llmEnabled && llmPreload) maybeWarmLlm('toggle').catch(() => {});
+};
+window.changeLlmPreload = function(next) {
+  llmPreload = next === 'true';
+  savePrefs();
+};
 window.changeGemmaModel = function(next) {
   gemmaModelKey = sanitizeGemmaModelKey(next);
   gemmaLoaded   = false;
@@ -574,57 +724,28 @@ window.changeGemmaModel = function(next) {
   savePrefs();
   syncControls();
 };
+window.clearModelMetadata = function() {
+  localStorage.removeItem('citrus_llm_last_ready');
+  clearModelLog();
+  syncControls();
+};
 
 // ---- Model load ----
 window.loadModel = async function() {
-  if (engineMode === 'webspeech-gemma') { await loadGemmaModel(); return; }
-  if (!engineMode.startsWith('whisper')) return;
-  const cfg    = MODEL_CONFIGS[engineMode];
-  const btn    = document.getElementById('btnLoad');
-  const status = document.getElementById('modelStatus');
-  btn.textContent = '로딩중';
-  btn.classList.add('disabled');
-  status.className = 'model-status loading';
-  status.innerHTML = `${cfg.label} 다운로드/초기화 중입니다.<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
-  const loadStarted = performance.now();
-  try {
-    transcriber = await pipeline('automatic-speech-recognition', cfg.modelId, {
-      dtype: cfg.dtype,
-      device: 'wasm',
-      progress_callback: (p) => {
-        const fill = document.getElementById('progFill');
-        if (!fill) return;
-        if (p.status === 'progress' && p.total) {
-          const pct = Math.round(p.loaded / p.total * 100);
-          fill.style.width = pct + '%';
-          if (status.firstChild) status.firstChild.textContent = `${cfg.label} ${p.file || 'model'} ${pct}%`;
-        }
-        if (p.status === 'ready') fill.style.width = '100%';
-      },
-    });
-    setStatus('proc', 'warm-up 중');
-    await transcriber(new Float32Array(16000), {language: 'korean', task: 'transcribe', chunk_length_s: 0});
-    modelLoaded    = true;
-    activeModelKey = engineMode;
-    btn.textContent = '모델 로드';
-    btn.classList.remove('disabled');
-    recordSystemLog('model-load', {engineMode, modelId: cfg.modelId, ms: Math.round(performance.now() - loadStarted)});
-    syncControls();
-    setStatus('ok', `${cfg.label} 준비 완료`);
-  } catch(e) {
-    btn.textContent = '재시도';
-    btn.classList.remove('disabled');
-    status.className = 'model-status error';
-    status.innerHTML = `모델 로드 실패: ${escapeHtml(e.message)}<div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>`;
-    recordSystemLog('model-load-error', {engineMode, modelId: cfg.modelId, error: e.message});
-    setStatus('err', '모델 로드 실패');
-  }
+  await loadGemmaModel();
 };
 
-async function loadGemmaModel() {
+async function maybeWarmLlm(reason = 'manual') {
+  if (!llmEnabled || gemmaLoaded || gemmaLoading) return;
+  if (!gemmaAvailability?.supported) return;
+  await loadGemmaModel({silent: reason !== 'manual', reason});
+}
+
+async function loadGemmaModel({silent = false, reason = 'manual'} = {}) {
   if (gemmaLoading) return;
-  const gemmaCfg = getGemmaConfig();
+  const gemmaCfg = getGemmaConfig(gemmaModelKey);
   const modelId = gemmaCfg.modelId;
+  if (!llmEnabled) return;
   if (!gemmaAvailability?.supported) {
     gemmaRuntimeState = {
       status: GEMMA_LOAD_STATES.failed,
@@ -666,13 +787,14 @@ async function loadGemmaModel() {
     window._gemmaModel     = ready.model;
     window._gemmaDevice    = ready.device;
     window._gemmaDtype     = ready.dtype;
-    gemmaLoaded  = true;
+  gemmaLoaded  = true;
     gemmaLoading = false;
-    btn.textContent = 'Gemma 재로드';
+    btn.textContent = 'LLM 재로드';
     btn.classList.remove('disabled');
+    localStorage.setItem('citrus_llm_last_ready', new Date().toISOString());
     recordSystemLog('gemma-load', {modelId, device: ready.device, dtype: ready.dtype, ms: Math.round(performance.now() - loadStarted)});
     syncControls();
-    setStatus('ok', `Gemma 4 준비 완료 (${ready.device}, ${ready.dtype})`);
+    if (!silent) setStatus('ok', `LLM 준비 완료 (${ready.device}, ${ready.dtype})`);
   } catch(e) {
     window._gemmaProcessor = null;
     window._gemmaModel     = null;
@@ -680,7 +802,7 @@ async function loadGemmaModel() {
     window._gemmaDtype     = null;
     gemmaLoaded = false;
     gemmaLoading = false;
-    btn.textContent = 'Gemma 재시도';
+    btn.textContent = 'LLM 재시도';
     btn.classList.remove('disabled');
     gemmaRuntimeState = {
       ...gemmaRuntimeState,
@@ -689,33 +811,67 @@ async function loadGemmaModel() {
       runtime: getGemmaRuntimeDiagnostics(),
     };
     appendModelLog('최종 failed', e.message);
-    recordSystemLog('gemma-load-error', {modelId, error: e.message});
+    recordSystemLog('gemma-load-error', {modelId, error: e.message, reason});
     syncControls();
-    setStatus('ok', 'Web Speech 시작 가능 (Gemma 실패)');
+    if (!silent) setStatus('ok', 'Web Speech 시작 가능 (LLM 실패)');
   }
 }
 
 // ---- Custom fields UI ----
-window.toggleCustomPanel = function() {
-  const p = document.getElementById('customPanel');
-  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+window.cancelSchemaEdit = function() {
+  schemaEditingName = null;
+  document.getElementById('schemaEditLabel').textContent = '새 항목 추가';
+  document.getElementById('schemaSubmitBtn').textContent = '항목 추가';
+  document.getElementById('cfName').value = '';
+  document.getElementById('cfType').value = 'float';
+  document.getElementById('cfMin').value = '';
+  document.getElementById('cfMax').value = '';
+  document.getElementById('cfShort').value = '';
+  document.getElementById('cfExample').value = '';
+  document.getElementById('cfOptions').value = '';
+  document.getElementById('cfWarnMax').value = '';
+  document.getElementById('cfPriority').value = '';
+  document.getElementById('cfAliases').value = '';
+  document.getElementById('cfNoteField').value = 'false';
+};
+window.editSchemaField = function(name) {
+  const meta = serializeFieldSchema(FIELDS[name]);
+  schemaEditingName = name;
+  document.getElementById('schemaEditLabel').textContent = `${name} 편집`;
+  document.getElementById('schemaSubmitBtn').textContent = '항목 저장';
+  document.getElementById('cfName').value = name;
+  document.getElementById('cfType').value = meta.type;
+  document.getElementById('cfMin').value = meta.validation?.allowedMin ?? '';
+  document.getElementById('cfMax').value = meta.validation?.allowedMax ?? '';
+  document.getElementById('cfShort').value = meta.short || '';
+  document.getElementById('cfExample').value = meta.exampleUtterance || '';
+  document.getElementById('cfOptions').value = meta.options?.length ? meta.options.join(',') : meta.allowedValues?.join(',') || '';
+  document.getElementById('cfWarnMax').value = meta.validation?.warnMax ?? '';
+  document.getElementById('cfPriority').value = meta.priority ?? '';
+  document.getElementById('cfAliases').value = meta.aliases?.join(', ') || '';
+  document.getElementById('cfNoteField').value = String(!!meta.noteField);
+  switchTab('schema');
 };
 window.addCustomField = function() {
+  const wasEditing = !!schemaEditingName;
   const name     = (document.getElementById('cfName').value || '').trim();
   const type     = document.getElementById('cfType').value;
   const minV     = document.getElementById('cfMin').value;
   const maxV     = document.getElementById('cfMax').value;
   const short    = (document.getElementById('cfShort').value || '').trim() || null;
   const exampleUtterance = (document.getElementById('cfExample').value || '').trim();
-  const options   = (document.getElementById('cfOptions').value || '').trim();
+  const optionsRaw = (document.getElementById('cfOptions').value || '').trim();
+  const warnMax   = document.getElementById('cfWarnMax').value;
+  const priority  = document.getElementById('cfPriority').value;
+  const noteField = document.getElementById('cfNoteField').value === 'true';
   const aliases   = (document.getElementById('cfAliases').value || '').split(',').map((item) => item.trim()).filter(Boolean);
   if (!name) { alert('항목명을 입력하세요'); return; }
-  if (Object.prototype.hasOwnProperty.call(FIELDS, name)) { alert('이미 존재하는 항목입니다: ' + name); return; }
-  const range = (type !== 'text' && type !== 'enum' && minV !== '' && maxV !== '') ? {
+  if (!schemaEditingName && Object.prototype.hasOwnProperty.call(customFields, name)) { alert('이미 존재하는 커스텀 항목입니다: ' + name); return; }
+  const range = (type !== 'text' && type !== 'enum' && type !== 'boolean' && minV !== '' && maxV !== '') ? {
     allowedMin: Number(minV),
     allowedMax: Number(maxV),
     warnMin: Number(minV),
-    warnMax: Number(maxV),
+    warnMax: warnMax !== '' ? Number(warnMax) : Number(maxV),
     reconfirmMin: Number(minV),
     reconfirmMax: Number(maxV),
   } : null;
@@ -724,44 +880,48 @@ window.addCustomField = function() {
     unit: '',
     short,
     aliases,
-    options,
+    options: type === 'enum' ? optionsRaw : undefined,
+    allowedValues: type === 'int' && optionsRaw ? optionsRaw : undefined,
     exampleUtterance,
     validation: range,
+    noteField,
+    priority: priority !== '' ? Number(priority) : undefined,
   });
+  if (schemaEditingName && schemaEditingName !== name) delete customFields[schemaEditingName];
   customFields[name] = def;
   rebuildFieldRegistry();
   saveCustomFields();
-  renderCustomFieldList();
-  document.getElementById('cfName').value  = '';
-  document.getElementById('cfShort').value = '';
-  document.getElementById('cfMin').value   = '';
-  document.getElementById('cfMax').value   = '';
-  document.getElementById('cfExample').value = '';
-  document.getElementById('cfOptions').value = '';
-  document.getElementById('cfAliases').value = '';
-  recordSystemLog('custom-field-added', {name, type, range, short, exampleUtterance, options: def.options, aliasSuggestions: def.aliasSuggestions});
+  cancelSchemaEdit();
+  recordSystemLog(wasEditing ? 'schema-field-updated' : 'custom-field-added', {name, type, range, short, exampleUtterance, options: def.options, allowedValues: def.allowedValues, aliasSuggestions: def.aliasSuggestions, noteField});
 };
 window.removeCustomField = function(name) {
-  if (!customFields[name]) return;
-  delete customFields[name];
+  if (customFields[name]) delete customFields[name];
   rebuildFieldRegistry();
   saveCustomFields();
-  renderCustomFieldList();
-  recordSystemLog('custom-field-removed', {name});
+  cancelSchemaEdit();
+  recordSystemLog('schema-field-reset', {name});
+};
+window.resetSchemaPreset = function() {
+  customFields = {};
+  rebuildFieldRegistry();
+  saveCustomFields();
+  cancelSchemaEdit();
+  recordSystemLog('schema-preset-reset', {});
 };
 function renderCustomFieldList() {
   const list = document.getElementById('customFieldList');
   if (!list) return;
-  const keys = Object.keys(customFields);
+  const keys = Object.keys(FIELDS);
   if (!keys.length) { list.textContent = '추가된 항목 없음'; return; }
   list.innerHTML = keys.map(k =>
-    `<div class="cf-row"><span><b style="color:var(--ac)">${escapeHtml(k)}</b><br>${escapeHtml(customFields[k].type)}${customFields[k].short ? ' / 약칭 ' + escapeHtml(customFields[k].short) : ''}${customFields[k].exampleUtterance ? ' / 예시 ' + escapeHtml(customFields[k].exampleUtterance) : ''}<br>alias: ${escapeHtml((customFields[k].aliasSuggestions || generateAliasSuggestions(k, customFields[k])).slice(0, 6).join(', '))}</span><button class="mini" data-field="${escapeHtml(k)}" onclick="window.removeCustomField(this.dataset.field)">삭제</button></div>`
+    `<div class="cf-row"><span><b style="color:var(--ac)">${escapeHtml(k)}</b> ${customFields[k] ? '<span class="mono" style="color:var(--gn)">custom</span>' : '<span class="mono" style="color:var(--txm)">preset</span>'}<br>${escapeHtml(FIELDS[k].type)}${FIELDS[k].short ? ' / 약칭 ' + escapeHtml(FIELDS[k].short) : ''}${FIELDS[k].noteField ? ' / 비고' : ''}<br>허용: ${escapeHtml(FIELDS[k].allowedValues?.join(', ') || `${FIELDS[k].validation?.allowedMin ?? '-'} ~ ${FIELDS[k].validation?.allowedMax ?? '-'}`)}<br>alias: ${escapeHtml((FIELDS[k].aliasSuggestions || generateAliasSuggestions(k, FIELDS[k])).slice(0, 6).join(', '))}</span><span style="display:flex;gap:6px"><button class="mini" data-field="${escapeHtml(k)}" onclick="window.editSchemaField(this.dataset.field)">편집</button><button class="mini" data-field="${escapeHtml(k)}" onclick="window.removeCustomField(this.dataset.field)">리셋</button></span></div>`
   ).join('');
 }
 
 // ---- Capture control ----
 window.toggleCapture = async function() {
   if (capturing) { stopCapture(); return; }
+  if (llmEnabled && llmPreload) maybeWarmLlm('capture-start').catch(() => {});
   if (engineMode === 'webspeech' || engineMode === 'webspeech-gemma') { startWebSpeech(); return; }
   await startWhisperCapture();
 };
@@ -810,6 +970,7 @@ function startWebSpeech() {
       handleTranscript(text, {engine: 'webspeech', model: 'apple-or-browser-stt', alternatives, asrMs: Math.round(performance.now() - start), capture: {source: 'webspeech'}});
     }
     if (interimText) {
+      lastInterimText = interimText;
       const preview = parser.preview(interimText);
       const previewText = preview?.field && preview?.value !== null && preview?.value !== undefined
         ? `${parser.describeValue(preview.field, preview.value)}`
@@ -1061,9 +1222,156 @@ function summarizeParse(parsed) {
   return {display: parsed.rawText || parsed.normalizedText || '', meta: parsed.matchMethod || ''};
 }
 
+function shouldTryLlmAssist(parsed, status, message) {
+  if (!llmEnabled || !gemmaLoaded || engineMode !== 'webspeech-gemma') return false;
+  if (parsed?.field === '비고') return false;
+  if (!parsed?.field) return true;
+  if (status === 'fail') return true;
+  if (status === 'warn' && (message.includes('허용') || message.includes('재확인') || parsed.matchMethod.includes('fuzzy') || (parsed.matchScore ?? 1) < 0.84)) return true;
+  return false;
+}
+
+function getSchemaPromptBlock(fields) {
+  return fields.map((field) => {
+    const meta = FIELDS[field];
+    if (!meta) return null;
+    return `- ${field} { type: ${meta.type}, aliases: [${[field, ...(meta.aliases || [])].slice(0, 8).join(', ')}], allowedValues: [${(meta.allowedValues || []).join(', ')}], range: [${meta.validation?.allowedMin ?? '-'}, ${meta.validation?.allowedMax ?? '-'}], options: [${(meta.options || []).join(', ')}], noteField: ${!!meta.noteField} }`;
+  }).filter(Boolean).join('\n');
+}
+
+function extractJsonBlock(text) {
+  const match = String(text || '').match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch { return null; }
+}
+
+function coerceLlmValue(meta, value) {
+  if (!meta) return {ok: false};
+  if (meta.type === 'int') {
+    const num = Number(value);
+    return Number.isInteger(num) ? {ok: true, value: num} : {ok: false};
+  }
+  if (meta.type === 'float') {
+    const num = Number(value);
+    return Number.isFinite(num) ? {ok: true, value: num} : {ok: false};
+  }
+  if (meta.type === 'boolean') return typeof value === 'boolean' ? {ok: true, value} : {ok: false};
+  if (meta.type === 'enum') return meta.options?.includes(value) ? {ok: true, value} : {ok: false};
+  if (meta.type === 'text') return typeof value === 'string' ? {ok: true, value: value.trim()} : {ok: false};
+  return {ok: false};
+}
+
+function updateCardWithLlm(logId, field, value, reason, latencyMs) {
+  const area = document.getElementById('results');
+  const card = area.querySelector(`[data-log-id="${logId}"]`);
+  if (!card) return;
+  card.classList.add('gemma-corrected');
+  const parsedDiv = card.querySelector('.card-parsed');
+  if (parsedDiv) {
+    const valueHtml = typeof value === 'string'
+      ? `<span class="card-value" style="font-size:18px">${escapeHtml(String(value))}</span>`
+      : `<span class="card-value">${escapeHtml(String(value))}</span>`;
+    parsedDiv.innerHTML = `<span class="card-field">${escapeHtml(field)}</span>${valueHtml}<span class="badge-gemma">LLM</span>`;
+  }
+  const meta = document.createElement('div');
+  meta.className = 'card-meta';
+  meta.innerHTML = `LLM 후보정: ${escapeHtml(reason || '')} (${latencyMs}ms)`;
+  card.appendChild(meta);
+}
+
+async function assistWithLlm(rawText, logId, parsed, status, message) {
+  const processor = window._gemmaProcessor;
+  const model = window._gemmaModel;
+  if (!processor || !model) return;
+  const state = parser.getState();
+  const ranked = parser.rankFieldCandidates(rawText, 4).map((item) => item.field);
+  const candidateFields = [...new Set([
+    ...(parsed?.field ? [parsed.field] : []),
+    ...(state.pendingField?.field ? [state.pendingField.field] : []),
+    ...ranked,
+    '조사나무',
+    '조사과실',
+    '횡경',
+    '종경',
+  ])].slice(0, 6);
+  const recent = feedbackLogs.filter((log) => log.kind === 'recognition').slice(-4).map((log) => `${log.parse?.field || '-'} ${log.parse?.value ?? ''}`).join(' | ');
+  const promptText = [
+    '역할: 감귤 현장 입력 후보정기',
+    '규칙 파서가 실패하거나 모호할 때만 사용된다.',
+    `입력 텍스트: ${rawText}`,
+    `현재 규칙 결과: ${parsed?.field || 'null'} / ${parsed?.value ?? 'null'} / ${status} / ${message || '-'}`,
+    `최근 문맥: ${recent || '-'}`,
+    `현재 pending field: ${state.pendingField?.field || 'null'}`,
+    '후보 필드 schema:',
+    getSchemaPromptBlock(candidateFields),
+    '제약:',
+    '- 반드시 JSON 한 개만 반환',
+    '- 새로운 field를 만들지 말 것',
+    '- schema 밖 값 금지',
+    '- enum은 허용값 중 하나만',
+    '- string이 아니면 자유문장 금지',
+    '형식:',
+    '{"field":"조사나무","value":2,"confidence":0.86,"reason":"..."}',
+  ].join('\n');
+
+  try {
+    const {text: generated, latencyMs} = await runGemmaPrompt({
+      processor,
+      model,
+      promptText,
+      maxNewTokens: 120,
+    });
+    const payload = extractJsonBlock(generated);
+    const logEntry = feedbackLogs.find((log) => log.id === logId);
+    if (!payload || !payload.field || !FIELDS[payload.field]) {
+      if (logEntry) {
+        logEntry.gemma = {mode: 'schema-assist', inputText: rawText, outputText: generated, rejected: true, reason: 'invalid-json'};
+        persistLogs();
+      }
+      return;
+    }
+    const meta = FIELDS[payload.field];
+    const coerced = coerceLlmValue(meta, payload.value);
+    if (!coerced.ok) return;
+    const validation = parser.validateValue(payload.field, coerced.value);
+    if (validation.severity === 'fail' || validation.severity === 'reconfirm') return;
+
+    if (logEntry) {
+      logEntry.gemma = {
+        mode: 'schema-assist',
+        inputText: rawText,
+        outputText: generated,
+        resolvedField: payload.field,
+        resolvedValue: coerced.value,
+        confidence: payload.confidence ?? null,
+        reason: payload.reason || '',
+        latencyMs,
+      };
+      logEntry.status = 'ok';
+      logEntry.message = `LLM 후보정 적용: ${payload.reason || ''}`;
+      logEntry.parse = {
+        ...(logEntry.parse || {}),
+        field: payload.field,
+        value: coerced.value,
+        matchMethod: 'llm-schema-assist',
+        matchScore: Number(payload.confidence || 0.85),
+      };
+      persistLogs();
+    }
+    updateCardWithLlm(logId, payload.field, coerced.value, payload.reason || '', latencyMs);
+    setLiveResult('FINAL', parser.describeValue(payload.field, coerced.value), `LLM 후보정 적용: ${payload.reason || ''}`, 'final');
+    if (meta.type !== 'text' && meta.type !== 'enum') {
+      parser.setLastNumericTarget({field: payload.field, logId, setAt: Date.now(), value: coerced.value});
+    }
+  } catch (error) {
+    recordSystemLog('gemma-schema-error', {logId, error: error.message});
+  }
+}
+
 // ---- Handle transcript ----
 function handleTranscript(text, meta) {
   totalRecognitionCount++;
+  lastInterimText = '';
   const started = performance.now();
   const parsed  = parser.parseUtterance(text);
   const parseMs = Math.round(performance.now() - started);
@@ -1109,20 +1417,23 @@ function handleTranscript(text, meta) {
   updateStats();
   const entry = {raw: text, field: parsed?.field, value: parsed?.value, status, message, matchMethod: parsed?.matchMethod, matchScore: parsed?.matchScore, logId: log.id, replacesLogId: parsed?.replacesLogId};
   addCard(entry);
+  if (shouldTryLlmAssist(parsed, status, message)) {
+    assistWithLlm(text, log.id, parsed, status, message).catch(() => {});
+  }
   if (parsed?.field && parsed.value !== null) {
     if (FIELDS[parsed.field]?.type !== 'text' && FIELDS[parsed.field]?.type !== 'enum') {
       parser.setLastNumericTarget({field: parsed.field, logId: log.id, setAt: Date.now(), value: parsed.value});
     }
     try { navigator.vibrate(status === 'ok' ? [35] : [45, 35, 45]); } catch {}
     const isOverwrite = parsed.matchMethod === 'overwrite-last-number' || parsed.matchMethod === 'explicit-correction';
-    const speakText = parsed.field === '비고'
+    const speakText = FIELDS[parsed.field]?.noteField
       ? '비고 저장'
       : isOverwrite
         ? `수정 ${parser.describeValue(parsed.field, parsed.value)}`
         : parser.describeValue(parsed.field, parsed.value);
     speak(speakText);
     showToast(isOverwrite ? `수정 ${parsed.field}` : parsed.field, parsed.value);
-    if (parsed.field === '비고' && gemmaLoaded && engineMode === 'webspeech-gemma') {
+    if (FIELDS[parsed.field]?.noteField && gemmaLoaded && engineMode === 'webspeech-gemma') {
       refineNoteAsync(text, log.id, parsed).catch(() => {});
     }
   }
@@ -1134,13 +1445,11 @@ async function refineNoteAsync(rawText, logId, parsedNote) {
   const model     = window._gemmaModel;
   if (!processor || !model) return;
   try {
-    const {text: generated, latencyMs} = await runGemmaTextCorrection({
+    const {text: generated, latencyMs} = await runGemmaPrompt({
       processor,
       model,
-      rawText: `원문: ${rawText}\n지시: 감귤조사 비고를 새 사실 추가 없이 짧게 정리하고 한국어 결과만 출력`,
-      fieldList: ['비고'],
-      aliasHints: GEMMA_ALIAS_HINTS,
-      maxNewTokens: 48,
+      promptText: `역할: 감귤조사 비고 정리기\n제약: 새 사실 추가 금지, 과한 요약 금지, 사용자가 말한 내용만 한국어로 정리\n원문: ${rawText}\n출력: 정리된 문장만`,
+      maxNewTokens: 64,
     });
     if (!generated) return;
 
@@ -1184,9 +1493,10 @@ function recordRecognitionLog(rawText, parsed, meta) {
     appVersion:      APP_VERSION,
     kind:            'recognition',
     engine:          meta.engine || engineMode,
-    model:           meta.model  || (MODEL_CONFIGS[engineMode]?.modelId || 'webspeech'),
+    model:           meta.model  || (engineMode === 'webspeech-gemma' ? getGemmaModelId(gemmaModelKey) : (MODEL_CONFIGS[engineMode]?.modelId || 'webspeech')),
     vadMode,
     rawText,
+    interimText:     meta.interimText || lastInterimText || '',
     alternatives:    meta.alternatives || [],
     normalizedText:  parsed?.normalizedText || '',
     parse:           parsed ? {field: parsed.field, value: parsed.value, rawField: parsed.rawField, matchScore: parsed.matchScore, matchMethod: parsed.matchMethod, parseKind: parsed.parseKind || null, replacesLogId: parsed.replacesLogId || null, candidates: parsed.candidates || []} : null,
@@ -1309,9 +1619,9 @@ window.downloadLogs = function(format) {
   downloadBlob(`citrus-voice-feedback-${stamp}.json`, JSON.stringify(feedbackLogs, null, 2), 'application/json;charset=utf-8');
 };
 function logsToCsv(logs) {
-  const rows = [['ts','kind','engine','model','rawText','field','value','score','method','status','message','asrMs','parseMs','audioMs','feedback','expectedText']];
+  const rows = [['ts','kind','engine','model','rawText','interimText','field','value','score','method','status','message','llmField','llmValue','llmReason','asrMs','parseMs','audioMs','feedback','expectedText']];
   for (const log of logs) {
-    rows.push([log.ts, log.kind, log.engine, log.model || '', log.rawText || '', log.parse?.field || '', log.parse?.value ?? '', log.parse?.matchScore ?? '', log.parse?.matchMethod || '', log.status || '', log.message || log.detail?.error || '', log.timing?.asrMs ?? '', log.timing?.parseMs ?? '', log.capture?.audioMs ?? '', log.feedback?.verdict || '', log.feedback?.expectedText || '']);
+    rows.push([log.ts, log.kind, log.engine, log.model || '', log.rawText || '', log.interimText || '', log.parse?.field || '', log.parse?.value ?? '', log.parse?.matchScore ?? '', log.parse?.matchMethod || '', log.status || '', log.message || log.detail?.error || '', log.gemma?.resolvedField || '', log.gemma?.resolvedValue ?? '', log.gemma?.reason || '', log.timing?.asrMs ?? '', log.timing?.parseMs ?? '', log.capture?.audioMs ?? '', log.feedback?.verdict || '', log.feedback?.expectedText || '']);
   }
   return rows.map(row => row.map(csvCell).join(',')).join('\n');
 }

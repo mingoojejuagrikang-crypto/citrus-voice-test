@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>감귤조사 v6.3 - 현장 음성 파서</title>
+<title>감귤조사 v7.0 - 스키마 기반 현장 입력</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -77,9 +77,18 @@
   .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
   .tiny{font-size:10px;color:var(--txm);line-height:1.5}
   textarea{width:100%;border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;padding:9px;resize:vertical;min-height:66px}
+  .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+  .tab-btn{padding:10px 8px;border:1px solid var(--bd);border-radius:8px;background:var(--sf);color:var(--txm);font-size:11px;font-weight:900;text-align:center;cursor:pointer}
+  .tab-btn.active{background:var(--sf2);color:var(--ac);border-color:var(--ac)}
+  .tab-pane{display:none}
+  .tab-pane.active{display:block}
+  .schema-actions{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .schema-card{background:var(--sf2);border-radius:8px;padding:9px 10px;border:1px solid var(--bd);margin-bottom:8px}
+  .kv{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 </style>
-  <script type="module" crossorigin src="./assets/main-DHnLdaBg.js"></script>
-  <link rel="modulepreload" crossorigin href="./assets/gemma-loader-PXyAJwQf.js">
+  <script type="module" crossorigin src="./assets/main-BWKrzezF.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/gemma-loader-CVMTzbLO.js">
 </head>
 <body>
 <div id="criosWarning" style="display:none;background:#ef4444;color:#fff;text-align:center;padding:10px 14px;font-size:13px;font-weight:700;position:sticky;top:0;z-index:999;line-height:1.4">
@@ -88,22 +97,29 @@
 </div>
 <div class="app">
   <div class="hdr">
-    <h1>감귤조사 v6.3</h1>
-    <div class="ver">즉시 출력 + 붙여말하기 복구 + 비고 LLM 실험 + 사용자 정의 항목</div>
+    <h1>감귤조사 v7.0</h1>
+    <div class="ver">스키마 기반 입력 + 규칙 파서 우선 + LLM 후보정</div>
   </div>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="input" onclick="window.switchTab(this.dataset.tab)">입력</button>
+    <button class="tab-btn" data-tab="schema" onclick="window.switchTab(this.dataset.tab)">항목 설정</button>
+    <button class="tab-btn" data-tab="models" onclick="window.switchTab(this.dataset.tab)">모델 상태</button>
+    <button class="tab-btn" data-tab="logs" onclick="window.switchTab(this.dataset.tab)">로그</button>
+  </div>
+
+  <div class="tab-pane active" id="tab-input">
   <div class="panel">
     <div class="grid">
       <label>인식 엔진
         <select id="engineSelect" onchange="window.changeEngine(this.value)">
-          <option value="webspeech">Web Speech 빠른 모드</option>
-          <option value="webspeech-gemma">Web Speech + Gemma 비고 정리 실험</option>
-          <option value="whisper-tiny">Whisper tiny 비추천</option>
-          <option value="whisper-base">Whisper base 비추천</option>
+          <option value="webspeech">Web Speech 기본</option>
+          <option value="webspeech-gemma">Web Speech + LLM 후보정</option>
         </select>
       </label>
       <label>VAD 감도
         <select id="modeSelect" onchange="window.changeVadMode(this.value)">
-          <option value="fast">빠른 반응</option>
+          <option value="fast">fast</option>
+          <option value="balanced">balanced</option>
           <option value="accurate">정확 우선</option>
         </select>
       </label>
@@ -117,50 +133,31 @@
         </select>
       </label>
       <label>현장 메모
-        <div class="tiny" style="padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--sf2)">일반 항목은 규칙 기반, 비고만 LLM 정리</div>
+        <div class="tiny" style="padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--sf2)">일반 항목은 규칙 파서 우선, 실패/모호 시 LLM 후보정</div>
       </label>
     </div>
-    <div id="gemmaModelRow" style="margin-top:8px;display:none">
-      <label>비고용 Gemma 모델
+    <div id="gemmaModelRow" style="margin-top:8px;display:block">
+      <label>LLM 모델
         <select id="gemmaModelSelect" onchange="window.changeGemmaModel(this.value)">
           <option value="gemma-4-e2b">Gemma 4 E2B (~500MB, 자동 최적화)</option>
         </select>
       </label>
     </div>
   </div>
-  <button class="btn" id="btnCustomToggle" onclick="window.toggleCustomPanel()" style="width:100%;margin-bottom:8px;font-size:11px">⚙ 항목 추가/관리</button>
-  <div class="panel" id="customPanel" style="display:none">
-    <div style="font-size:12px;color:var(--txm);font-weight:700;margin-bottom:8px">사용자 정의 항목 추가</div>
-    <div style="display:grid;grid-template-columns:2fr 1fr;gap:6px;margin-bottom:6px">
-      <input id="cfName" placeholder="항목명 (예: 엽록소)" type="text" style="font-size:12px">
-      <select id="cfType" style="font-size:12px">
-        <option value="float">소수</option>
-        <option value="int">정수</option>
-        <option value="text">텍스트</option>
-        <option value="enum">선택형</option>
-      </select>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
-      <input id="cfMin" placeholder="최소값" type="number" style="font-size:12px">
-      <input id="cfMax" placeholder="최대값" type="number" style="font-size:12px">
-      <input id="cfShort" placeholder="약칭" type="text" style="font-size:12px">
-    </div>
-    <div class="subgrid">
-      <input id="cfExample" placeholder="예시 발화 (예: 착색도 삼)" type="text" style="font-size:12px">
-      <input id="cfOptions" placeholder="선택형 옵션 (예: 상,중,하)" type="text" style="font-size:12px">
-    </div>
-    <textarea id="cfAliases" placeholder="추가 alias가 있으면 쉼표로 입력. 비워두면 규칙 기반 후보 자동 생성"></textarea>
-    <button class="btn" onclick="window.addCustomField()" style="width:100%;margin-bottom:8px">항목 추가</button>
-    <div id="customFieldList" style="font-size:11px;color:var(--txd)">추가된 항목 없음</div>
-  </div>
   <div class="model-status" id="modelStatus">
-    iPhone Safari에서는 Web Speech 빠른 모드를 기본으로 사용하세요. Whisper는 비교용입니다.
+    앱 시작 시 LLM 준비 상태를 확인합니다. 실제 runtime ready가 아닐 때는 후보정에 사용하지 않습니다.
     <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
   </div>
-  <div class="model-log" id="modelLog"></div>
   <div class="status">
     <div class="dot ok" id="dot"></div>
     <span id="statusText">시작 대기</span>
+  </div>
+  <div class="schema-card">
+    <div class="live-head"><span>입력 컨텍스트</span><span id="llmBadge">LLM 대기</span></div>
+    <div class="kv">
+      <div class="tiny">pending field<br><b id="pendingFieldText" style="color:var(--tx)">없음</b></div>
+      <div class="tiny">LLM 상태<br><b id="llmStateText" style="color:var(--tx)">확인 전</b></div>
+    </div>
   </div>
   <div class="live-box interim" id="liveBox">
     <div class="live-head">
@@ -179,19 +176,108 @@
   </div>
   <div class="results" id="results">
     <div class="empty" id="empty">
-      iPhone Safari 기본값은 Web Speech 빠른 모드입니다.<br>
-      interim으로 먼저 보여주고 final에서 보정합니다.<br>
-      일반 항목은 규칙 기반, 비고만 LLM 정리 대상입니다.<br>
-      TTS 중에 말하면 즉시 중단하고 인식합니다 (바지인).
+      기본 모드는 balanced입니다.<br>
+      interim을 먼저 보여주고 final에서 스키마 검증 후 확정합니다.<br>
+      비고는 note mode로 길게 수집하고, LLM 준비 시 정리본을 추가합니다.
     </div>
+  </div>
+  </div>
+
+  <div class="tab-pane" id="tab-schema">
+  <div class="panel" id="customPanel">
+    <div style="font-size:12px;color:var(--txm);font-weight:700;margin-bottom:8px">항목 스키마 편집</div>
+    <div class="schema-actions">
+      <button class="btn" onclick="window.resetSchemaPreset()">프리셋 초기화</button>
+      <button class="btn" onclick="window.cancelSchemaEdit()">편집 취소</button>
+    </div>
+    <div class="tiny" id="schemaEditLabel" style="margin-bottom:8px">새 항목 추가</div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:6px;margin-bottom:6px">
+      <input id="cfName" placeholder="항목명 (예: 엽록소)" type="text" style="font-size:12px">
+      <select id="cfType" style="font-size:12px">
+        <option value="float">소수</option>
+        <option value="int">정수</option>
+        <option value="text">텍스트</option>
+        <option value="enum">선택형</option>
+        <option value="boolean">boolean</option>
+      </select>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
+      <input id="cfMin" placeholder="최소값" type="number" style="font-size:12px">
+      <input id="cfMax" placeholder="최대값" type="number" style="font-size:12px">
+      <input id="cfShort" placeholder="약칭" type="text" style="font-size:12px">
+    </div>
+    <div class="subgrid">
+      <input id="cfExample" placeholder="예시 발화 (예: 착색도 삼)" type="text" style="font-size:12px">
+      <input id="cfOptions" placeholder="선택형/허용값 (예: 상,중,하 또는 1,2,3)" type="text" style="font-size:12px">
+    </div>
+    <div class="subgrid">
+      <input id="cfWarnMax" placeholder="주의 상한 (예: 200)" type="number" style="font-size:12px">
+      <input id="cfPriority" placeholder="우선순위 (기본 70)" type="number" style="font-size:12px">
+    </div>
+    <label style="margin-top:6px">
+      <span>alias 목록</span>
+      <textarea id="cfAliases" placeholder="추가 alias가 있으면 쉼표로 입력. 비워두면 규칙 기반 후보 자동 생성"></textarea>
+    </label>
+    <label style="margin-top:6px">
+      <span>비고 / 자유문장 항목</span>
+      <select id="cfNoteField" style="font-size:12px">
+        <option value="false">아니오</option>
+        <option value="true">예</option>
+      </select>
+    </label>
+    <button class="btn" onclick="window.addCustomField()" style="width:100%;margin-bottom:8px" id="schemaSubmitBtn">항목 추가</button>
+    <div id="customFieldList" style="font-size:11px;color:var(--txd)">추가된 항목 없음</div>
+  </div>
+  </div>
+
+  <div class="tab-pane" id="tab-models">
+  <div class="panel">
+    <div class="schema-card">
+      <div class="live-head"><span>LLM 설정</span><span class="mono" id="cacheStateText">cache unknown</span></div>
+      <div class="subgrid">
+        <label>후보정 활성화
+          <select id="llmEnableSelect" onchange="window.changeLlmEnabled(this.value)">
+            <option value="true">enabled</option>
+            <option value="false">disabled</option>
+          </select>
+        </label>
+        <label>앱 시작 시 preload
+          <select id="llmPreloadSelect" onchange="window.changeLlmPreload(this.value)">
+            <option value="true">preload</option>
+            <option value="false">manual</option>
+          </select>
+        </label>
+      </div>
+      <div class="kv">
+        <div class="tiny">설정 enabled<br><b id="llmEnabledText" style="color:var(--tx)">-</b></div>
+        <div class="tiny">runtime ready<br><b id="llmRuntimeText" style="color:var(--tx)">-</b></div>
+      </div>
+    </div>
+    <div class="schema-actions">
+      <button class="btn" id="btnLoad" onclick="window.loadModel()">LLM 로드</button>
+      <button class="btn" onclick="window.clearModelMetadata()">메타데이터 초기화</button>
+    </div>
+    <div class="model-log" id="modelLog"></div>
+    <div class="tiny" id="modelDiagText">Whisper는 기본 엔진에서 숨김 처리됩니다. Gemma는 준비 가능할 때만 후보정에 사용됩니다.</div>
+  </div>
+  </div>
+
+  <div class="tab-pane" id="tab-logs">
+  <div class="panel">
+    <div class="schema-actions">
+      <button class="btn" onclick="window.downloadLogs('json')">JSON</button>
+      <button class="btn" onclick="window.downloadLogs('csv')">CSV</button>
+      <button class="btn" onclick="window.clearResults()">화면 초기화</button>
+    </div>
+    <div class="model-log" id="logConsole" style="display:block;max-height:360px">로그가 여기에 표시됩니다.</div>
+  </div>
   </div>
 </div>
 <div class="controls" id="controls">
-  <button class="btn" id="btnLoad" onclick="window.loadModel()" style="display:none">모델 로드</button>
   <button class="btn primary" id="btnStart" onclick="window.toggleCapture()">시작</button>
-  <button class="btn" onclick="window.downloadLogs('json')">JSON</button>
-  <button class="btn" onclick="window.downloadLogs('csv')">CSV</button>
-  <button class="btn" onclick="window.clearResults()">초기화</button>
+  <button class="btn" onclick="window.switchTab('schema')">항목</button>
+  <button class="btn" onclick="window.switchTab('models')">모델</button>
+  <button class="btn" onclick="window.switchTab('logs')">로그</button>
 </div>
 <div class="toast" id="toast"><div class="tf" id="toastF"></div><div class="tv" id="toastV"></div></div>
 </body>
