@@ -38,16 +38,25 @@ export function sanitizeGemmaModelKey(value) {
 }
 
 export async function detectWebGPU() {
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+    (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
   const result = {
     supported: false,
     hasNavigatorGpu: typeof navigator !== 'undefined' && 'gpu' in navigator,
     isSecureContext: typeof window === 'undefined' ? true : window.isSecureContext !== false,
+    isIOS,
     adapter: null,
     adapterInfo: null,
     reason: '',
     error: null,
   };
 
+  if (isIOS) {
+    result.reason = 'iOS/iPadOS에서는 WebGPU LLM을 지원하지 않습니다. 규칙 파서만 사용합니다.';
+    return result;
+  }
   if (!result.isSecureContext) {
     result.reason = '보안 컨텍스트(https) 환경이 아닙니다.';
     return result;
@@ -248,12 +257,23 @@ function normalizeProgressEvent(state, stage, event, weights) {
   const currentWeightedPercent = completedWeightPercent + ((normalizedStagePercent / 100) * (weights[stage] || 0));
   state.maxPercent = Math.max(state.maxPercent, Math.round(currentWeightedPercent));
 
+  // Accumulate across ALL stages for a single monotonic total
+  const allTotals = [...state.stages.values()].reduce((acc, s) => {
+    for (const f of s.files.values()) {
+      acc.loaded += Math.max(0, Number(f.loaded || 0));
+      acc.total += Math.max(0, Number(f.total || 0));
+    }
+    return acc;
+  }, {loaded: 0, total: 0});
+
   return {
     ...raw,
     currentFile: raw.file || '',
     stageLoaded: stageTotals.loaded,
     stageTotal: stageTotals.total,
     stagePercent: normalizedStagePercent,
+    allLoaded: allTotals.loaded,
+    allTotal: allTotals.total,
     percent: state.maxPercent || raw.percent,
   };
 }

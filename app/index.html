@@ -469,7 +469,9 @@ updateStats();
 renderCustomFieldList();
 renderLogConsole();
 if (prefs._needsResave) savePrefs();
-refreshGemmaAvailability();
+// WebGPU 감지는 페이지 로드 시 자동 실행하지 않음 (iOS Safari 크래시 방지)
+// 사용자가 LLM 로드 버튼을 누를 때 loadGemmaModel() 내부에서 호출됨
+syncControls();
 
 // ---- Prefs / Storage ----
 function loadPrefs() {
@@ -482,13 +484,13 @@ function loadPrefs() {
       ...parsed,
       gemmaModelKey,
       ttsRate: parsed.ttsRate ?? 0.95,
-      llmEnabled: parsed.llmEnabled ?? true,
+      llmEnabled: parsed.llmEnabled ?? false,
       llmPreload: parsed.llmPreload === true,
       activeTab: parsed.activeTab || 'input',
       _needsResave: gemmaModelKey !== storedGemma || Object.prototype.hasOwnProperty.call(parsed, 'gemmaModelId') || !hasStoredPreload,
     };
   } catch {
-    return {gemmaModelKey: GEMMA_DEFAULT_MODEL_KEY, ttsRate: 0.95, llmEnabled: true, llmPreload: false, activeTab: 'input', _needsResave: false};
+    return {gemmaModelKey: GEMMA_DEFAULT_MODEL_KEY, ttsRate: 0.95, llmEnabled: false, llmPreload: false, activeTab: 'input', _needsResave: false};
   }
 }
 function savePrefs() {
@@ -603,7 +605,7 @@ function handleGemmaLogEntry(entry) {
 function renderLogConsole() {
   const box = document.getElementById('logConsole');
   if (!box) return;
-  const logs = feedbackLogs.slice(-500).reverse();
+  const logs = feedbackLogs.slice(-50).reverse();
   if (!logs.length) {
     box.innerHTML = '<div style="color:var(--txd);padding:8px">로그가 여기에 표시됩니다.</div>';
     return;
@@ -645,7 +647,11 @@ function renderLogConsole() {
     const summaryText = `[${time}] system: ${log.kind}`;
     return `<details><summary style="cursor:pointer;font-family:monospace;font-size:12px;padding:3px 4px;color:var(--txd)">${escapeHtml(summaryText)}</summary><pre style="font-size:11px;padding:4px 8px;overflow-x:auto;margin:0;background:var(--sf2)">${escapeHtml(JSON.stringify(log.detail || {}, null, 2))}</pre></details>`;
   });
-  box.innerHTML = items.join('');
+  try {
+    box.innerHTML = items.join('');
+  } catch {
+    box.textContent = logs.map(l => `[${(l.ts||'').slice(11,19)}] ${l.kind||''} ${l.parse?.field||''} ${l.parse?.value??''}`).join('\n');
+  }
 }
 function updateStats() {
   document.getElementById('statOk').textContent      = statOk;
@@ -664,11 +670,22 @@ function formatProgressBytes(bytes) {
 
 function describeGemmaProgress(progress) {
   if (!progress) return '대기 중';
-  const parts = [];
-  if (progress.percent != null) parts.push(`총 ${progress.percent}%`);
-  if (progress.stageTotal > 0) parts.push(`${formatProgressBytes(progress.stageLoaded)}/${formatProgressBytes(progress.stageTotal)}`);
-  if (progress.currentFile) parts.push(progress.currentFile.split('/').pop());
-  return parts.join(' | ') || '대기 중';
+  const allTotal = progress.allTotal || 0;
+  const allLoaded = progress.allLoaded || 0;
+  if (allTotal > 0) {
+    const pct = Math.min(100, Math.round(allLoaded / allTotal * 100));
+    return `${formatProgressBytes(allLoaded)} / ${formatProgressBytes(allTotal)} (${pct}%)`;
+  }
+  if (progress.percent != null) return `${progress.percent}%`;
+  return '다운로드 준비 중';
+}
+function calcProgressPct(progress) {
+  if (!progress) return 0;
+  // allTotal 기반이면 단순 비율, 없으면 weighted percent (monotonic)
+  if ((progress.allTotal || 0) > 0) {
+    return Math.min(100, Math.round(progress.allLoaded / progress.allTotal * 100));
+  }
+  return progress.percent ?? 0;
 }
 
 // ---- UI sync ----
@@ -679,7 +696,7 @@ function syncControls() {
   const gemmaRow = document.getElementById('gemmaModelRow');
   const gemmaCfg = getGemmaConfig(gemmaModelKey);
   const progress = gemmaRuntimeState?.progress || null;
-  const progressPct = progress?.percent ?? (gemmaLoaded ? 100 : 0);
+  const progressPct = gemmaLoaded ? 100 : calcProgressPct(progress);
   const progressText = describeGemmaProgress(progress);
   const enabledLabel = llmEnabled ? 'enabled' : 'disabled';
   document.getElementById('llmEnabledText').textContent = enabledLabel;
@@ -716,7 +733,8 @@ function syncControls() {
     loadBtn.disabled = true;
     loadBtn.classList.add('disabled');
     status.className = 'model-status loading';
-    status.innerHTML = `LLM 준비 중: ${escapeHtml(gemmaRuntimeState.stage || 'start')}<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(gemmaCfg.modelId)} | device ${escapeHtml(gemmaCfg.device)} | dtype ${escapeHtml(gemmaCfg.dtype)}</div><div style="margin-top:4px;font-size:11px;color:var(--txm)">${escapeHtml(progressText)}</div><div class="prog-bar"><div class="prog-fill" id="progFill" style="width:${progressPct}%"></div></div>`;
+    const cacheHint = progress?.allTotal > 0 && progress.allLoaded === 0 ? '' : (progress?.allTotal > 0 ? '' : '브라우저 캐시에서 로드 중이면 빠르게 완료됩니다.');
+    status.innerHTML = `LLM 준비 중: ${escapeHtml(gemmaRuntimeState.stage || 'start')}<div style="margin-top:6px;font-size:11px;color:var(--txm)">모델 ${escapeHtml(gemmaCfg.modelId)} | device ${escapeHtml(gemmaCfg.device)} | dtype ${escapeHtml(gemmaCfg.dtype)}</div><div style="margin-top:4px;font-size:13px;color:var(--tx);font-weight:700">${escapeHtml(progressText)}</div>${cacheHint ? `<div style="margin-top:2px;font-size:11px;color:var(--txm)">${escapeHtml(cacheHint)}</div>` : ''}<div class="prog-bar"><div class="prog-fill" id="progFill" style="width:${progressPct}%"></div></div>`;
     setStatus('proc', 'LLM 준비 중');
   } else if (gemmaLoaded) {
     loadBtn.textContent = 'LLM 재로드';
