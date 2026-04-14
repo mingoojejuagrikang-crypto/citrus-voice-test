@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "build:version": "vite build && rm -rf versions/v006 && mkdir -p versions/v006 && cp -R dist/. versions/v006/"
+    "build:version": "vite build && rm -rf versions/v006 && mkdir -p versions/v006 && cp -R dist/. versions/v006/",
+    "build:codex": "vite build && rm -rf codex && mkdir -p codex && cp -R dist/. codex/"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.0.1",
