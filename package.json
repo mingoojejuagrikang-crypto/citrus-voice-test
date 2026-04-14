@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:version": "vite build && rm -rf versions/v006 && mkdir -p versions/v006 && cp -R dist/. versions/v006/"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.0.1",

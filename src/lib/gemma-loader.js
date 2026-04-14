@@ -136,6 +136,7 @@ export async function loadGemmaRuntime({
     const processor = await AutoProcessor.from_pretrained(modelId, {
       progress_callback: (event) => progress('processor', event),
     });
+    progress.markStageComplete('processor');
     emitLog(onLog, 'info', 'processor 로드 완료');
 
     emitState(onStateChange, {status: GEMMA_LOAD_STATES.loading, stage: 'model', webgpu, processor, ...base});
@@ -145,6 +146,7 @@ export async function loadGemmaRuntime({
       dtype,
       progress_callback: (event) => progress('model', event),
     });
+    progress.markStageComplete('model');
     emitLog(onLog, 'info', 'model 로드 완료');
 
     const ready = {
@@ -174,9 +176,19 @@ export async function loadGemmaRuntime({
 }
 
 function makeProgressTracker(onLog, onStateChange, base) {
+  const STAGE_WEIGHTS = {
+    processor: 15,
+    model: 85,
+  };
+  const state = {
+    stages: new Map(),
+    maxPercent: 0,
+    lastLogKey: '',
+  };
+
   const tracker = (stage, event) => {
     tracker.lastStage = stage;
-    const detail = normalizeProgress(event);
+    const detail = normalizeProgressEvent(state, stage, event, STAGE_WEIGHTS);
     emitState(onStateChange, {
       status: GEMMA_LOAD_STATES.loading,
       stage,
@@ -184,10 +196,76 @@ function makeProgressTracker(onLog, onStateChange, base) {
       rawProgress: event,
       ...base,
     });
-    emitLog(onLog, 'progress', `${stage} progress`, formatProgressMessage(detail));
+    const logKey = `${stage}:${detail.percent}:${detail.currentFile || ''}:${detail.status}:${detail.stagePercent}`;
+    if (state.lastLogKey !== logKey) {
+      state.lastLogKey = logKey;
+      emitLog(onLog, 'progress', `${stage} progress`, formatProgressMessage(detail));
+    }
   };
   tracker.lastStage = 'start';
+  tracker.markStageComplete = (stage) => {
+    getStageState(state, stage).complete = true;
+  };
   return tracker;
+}
+
+function normalizeProgressEvent(state, stage, event, weights) {
+  const raw = normalizeProgress(event);
+  const stageState = getStageState(state, stage);
+  const fileKey = `${stage}:${raw.file || raw.status || 'unknown'}`;
+
+  if (raw.total > 0 || raw.loaded > 0) {
+    const prev = stageState.files.get(fileKey) || {file: raw.file || '', loaded: 0, total: 0};
+    const nextTotal = Math.max(prev.total || 0, raw.total || 0);
+    const maxLoaded = Math.max(prev.loaded || 0, raw.loaded || 0, raw.status === 'done' ? nextTotal : 0);
+    stageState.files.set(fileKey, {
+      file: raw.file || prev.file || '',
+      loaded: nextTotal > 0 ? Math.min(nextTotal, maxLoaded) : maxLoaded,
+      total: nextTotal,
+    });
+  }
+
+  if (raw.status === 'done') {
+    stageState.complete = true;
+  }
+
+  const stageTotals = [...stageState.files.values()].reduce((acc, file) => {
+    acc.loaded += Math.max(0, Number(file.loaded || 0));
+    acc.total += Math.max(0, Number(file.total || 0));
+    return acc;
+  }, {loaded: 0, total: 0});
+
+  const stagePercent = raw.percent !== null
+    ? raw.percent
+    : stageTotals.total > 0
+      ? Math.max(0, Math.min(100, Math.round((stageTotals.loaded / stageTotals.total) * 100)))
+      : 0;
+  const normalizedStagePercent = stageState.complete ? 100 : stagePercent;
+  const completedWeightPercent = Object.entries(weights).reduce((acc, [name, weight]) => {
+    if (name === stage) return acc;
+    return acc + (getStageState(state, name).complete ? weight : 0);
+  }, 0);
+  const currentWeightedPercent = completedWeightPercent + ((normalizedStagePercent / 100) * (weights[stage] || 0));
+  state.maxPercent = Math.max(state.maxPercent, Math.round(currentWeightedPercent));
+
+  return {
+    ...raw,
+    currentFile: raw.file || '',
+    stageLoaded: stageTotals.loaded,
+    stageTotal: stageTotals.total,
+    stagePercent: normalizedStagePercent,
+    percent: state.maxPercent || raw.percent,
+  };
+}
+
+function getStageState(state, stage) {
+  if (!state.stages.has(stage)) {
+    state.stages.set(stage, {
+      complete: false,
+      files: new Map(),
+    });
+  }
+  return state.stages.get(stage);
 }
 
 function normalizeProgress(event) {
@@ -210,16 +288,17 @@ function normalizeProgress(event) {
 
 function formatProgressMessage(detail) {
   const parts = [];
-  if (detail.file) parts.push(detail.file);
-  if (detail.percent !== null) parts.push(`${detail.percent}%`);
-  if (detail.total > 0) {
-    parts.push(`${toMb(detail.loaded)}/${toMb(detail.total)}MB`);
+  if (detail.percent !== null) parts.push(`total ${detail.percent}%`);
+  if (detail.stageTotal > 0) {
+    parts.push(`${toMb(detail.stageLoaded)}/${toMb(detail.stageTotal)}MB`);
   }
+  if (detail.currentFile) parts.push(detail.currentFile);
+  if (detail.stagePercent !== null) parts.push(`stage ${detail.stagePercent}%`);
   return parts.join(' ') || detail.status;
 }
 
 function toMb(bytes) {
-  return (bytes / 1048576).toFixed(0);
+  return (bytes / 1048576).toFixed(bytes >= 104857600 ? 0 : 1);
 }
 
 export function buildGemmaPrompt(rawText, fieldList, aliasHints) {

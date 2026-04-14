@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>감귤조사 - Gemma 4 E2B 벤치마크</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{--bg:#10140f;--sf:#172018;--sf2:#223126;--bd:#344a38;--ac:#ff9d2e;--gn:#21b56b;--rd:#e34848;--bl:#4f8df7;--tx:#f4f7f1;--txd:#b8c3b1;--txm:#7b8977;--pu:#a855f7}
+  body{font-family:'Noto Sans KR',-apple-system,sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding:16px;max-width:720px;margin:0 auto}
+  h1{font-size:20px;font-weight:900;color:var(--ac);margin-bottom:4px}
+  .sub{font-size:12px;color:var(--txd);margin-bottom:16px}
+  .panel{background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:12px}
+  .panel h2{font-size:13px;color:var(--txm);font-weight:700;margin-bottom:10px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--txm);font-weight:700;flex:1;min-width:140px}
+  select,input{width:100%;border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;padding:9px}
+  .btn{padding:11px 16px;border:1px solid var(--bd);border-radius:8px;background:var(--sf);color:var(--txd);font-size:13px;font-family:inherit;font-weight:900;cursor:pointer}
+  .btn.primary{background:var(--ac);color:#111;border-color:var(--ac)}
+  .btn.disabled{opacity:.4;pointer-events:none}
+  .prog-wrap{margin-top:8px}
+  .prog-bar{height:5px;background:var(--sf2);border-radius:3px;overflow:hidden}
+  .prog-fill{height:100%;background:var(--ac);border-radius:3px;transition:width .3s;width:0%}
+  .log{background:var(--sf2);border-radius:8px;padding:10px;font-size:11px;color:var(--txd);line-height:1.6;max-height:120px;overflow-y:auto;margin-top:8px;white-space:pre-wrap;word-break:break-all}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{background:var(--sf2);color:var(--txm);font-weight:700;padding:7px 8px;text-align:left;border-bottom:1px solid var(--bd)}
+  td{padding:7px 8px;border-bottom:1px solid var(--sf2);vertical-align:top}
+  tr.pass td:last-child{color:var(--gn);font-weight:700}
+  tr.fail td:last-child{color:var(--rd);font-weight:700}
+  tr.running td{color:var(--ac)}
+  .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+  .scard{background:var(--sf2);border-radius:8px;padding:10px;text-align:center}
+  .scard b{display:block;font-size:20px;font-weight:900;color:var(--ac)}
+  .scard span{display:block;font-size:10px;color:var(--txm);margin-top:2px}
+  .device-info{font-size:11px;color:var(--txd);line-height:1.7}
+  .badge{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700}
+  .badge.pass{background:var(--gn);color:#000}
+  .badge.fail{background:var(--rd);color:#fff}
+  .badge.pend{background:var(--txm);color:#000}
+  .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .diag-card{background:var(--sf2);border-radius:8px;padding:10px;font-size:11px;line-height:1.6;color:var(--txd)}
+  .diag-card b{color:var(--txm)}
+</style>
+  <script type="module" crossorigin src="./assets/benchmark-D0jwRqGL.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/gemma-loader-BYbrD6_Q.js">
+</head>
+<body>
+<h1>Gemma 4 E2B 벤치마크</h1>
+<p class="sub">감귤조사 음성인식 보정 모델 속도/정확도 측정 — iPhone 13 mini (A15) / Galaxy S20 (SD865)</p>
+
+<div class="panel">
+  <h2>설정</h2>
+  <div class="row">
+    <label>모델
+      <select id="modelSelect">
+        <option value="gemma-4-e2b">Gemma 4 E2B (~500MB, 자동 최적화)</option>
+      </select>
+    </label>
+    <label>디바이스
+      <select id="deviceSelect" disabled>
+        <option value="webgpu">WebGPU 전용</option>
+      </select>
+    </label>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn primary" id="btnLoad" onclick="window.loadBenchModel()">모델 로드</button>
+    <button class="btn disabled" id="btnRun" onclick="window.runBenchmark()">벤치마크 실행</button>
+    <button class="btn disabled" id="btnExport" onclick="window.exportResults()">JSON 내보내기</button>
+  </div>
+  <div class="prog-wrap">
+    <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
+    <div class="log" id="logBox">모델을 로드한 후 벤치마크를 실행하세요.</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>런타임 진단</h2>
+  <div class="diag-grid">
+    <div class="diag-card" id="runtimeDiag">로딩 중...</div>
+    <div class="diag-card" id="loadDiag">모델 로드 전</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>디바이스 정보</h2>
+  <div class="device-info" id="deviceInfo">로딩 중...</div>
+</div>
+
+<div class="panel">
+  <h2>테스트 케이스</h2>
+  <table id="testTable">
+    <thead>
+      <tr><th>#</th><th>입력</th><th>기대</th><th>출력</th><th>시간(ms)</th><th>결과</th></tr>
+    </thead>
+    <tbody id="testBody"></tbody>
+  </table>
+  <div class="summary" id="summary" style="display:none">
+    <div class="scard"><b id="sumAcc">-</b><span>정확도</span></div>
+    <div class="scard"><b id="sumAvg">-</b><span>평균 ms</span></div>
+    <div class="scard"><b id="sumMin">-</b><span>최소 ms</span></div>
+    <div class="scard"><b id="sumMax">-</b><span>최대 ms</span></div>
+  </div>
+</div>
+
+</body>
+</html>
