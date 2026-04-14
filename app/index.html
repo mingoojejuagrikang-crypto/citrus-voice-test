@@ -573,12 +573,13 @@ function setLiveResult(stage, text, meta = '', tone = 'interim') {
   document.getElementById('liveMeta').textContent = meta || '확정 전에는 임시 텍스트, 확정 후에는 필드와 값이 표시됩니다.';
   updateQuickStatus();
 }
-window.switchTab = function(next) {
+function switchTab(next) {
   activeTab = next || 'input';
   document.querySelectorAll('.tab-btn').forEach((el) => el.classList.toggle('active', el.dataset.tab === activeTab));
   document.querySelectorAll('.tab-pane').forEach((el) => el.classList.toggle('active', el.id === `tab-${activeTab}`));
   savePrefs();
-};
+}
+window.switchTab = switchTab;
 function renderModelLog() {
   const box = document.getElementById('modelLog');
   if (!box) return;
