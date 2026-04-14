@@ -79,6 +79,8 @@ parser3.setLastNumericTarget({field: '횡경', logId: 'test', setAt: Date.now(),
 assertResult(parser3, '23.5', {field: '횡경', value: 23.5, method: 'overwrite-last-number'}, '숫자만으로 overwrite');
 parser3.setLastNumericTarget({field: '횡경', logId: 'test', setAt: Date.now() - 2500, value: 22.5});
 assertResult(parser3, '24.5', {field: null}, 'overwrite 시간 제한');
+parser3.setLastNumericTarget({field: '횡경', logId: 'test', setAt: Date.now(), value: 22.5});
+assertResult(parser3, '10,000,000,000,000,160 66', {field: null}, '콤마 포함 대형 숫자 overwrite 금지 (B-1)');
 
 console.log('\n=== 비고 테스트 ===\n');
 

@@ -87,7 +87,7 @@
   .kv{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 </style>
-  <script type="module" crossorigin src="./assets/main-BBSxdstI.js"></script>
+  <script type="module" crossorigin src="./assets/main-C0Rb22jX.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/gemma-loader-CVMTzbLO.js">
 </head>
 <body>
@@ -128,7 +128,7 @@
       <label>TTS 속도
         <select id="ttsRateSelect" onchange="window.changeTtsRate(this.value)">
           <option value="0.85">느리게 0.85</option>
-          <option value="0.95">보통 0.95</option>
+          <option value="0.95" selected>보통 0.95</option>
           <option value="1.05">빠르게 1.05</option>
         </select>
       </label>
@@ -265,11 +265,12 @@
   <div class="tab-pane" id="tab-logs">
   <div class="panel">
     <div class="schema-actions">
-      <button class="btn" onclick="window.downloadLogs('json')">JSON</button>
-      <button class="btn" onclick="window.downloadLogs('csv')">CSV</button>
-      <button class="btn" onclick="window.clearResults()">화면 초기화</button>
+      <button class="btn" onclick="window.downloadLogs('json')">JSON 다운</button>
+      <button class="btn" onclick="window.downloadLogs('csv')">CSV 다운</button>
+      <button class="btn" onclick="window.copyLogs()">로그 복사</button>
+      <button class="btn" onclick="window.clearLogs()">로그 지우기</button>
     </div>
-    <div class="model-log" id="logConsole" style="display:block;max-height:360px">로그가 여기에 표시됩니다.</div>
+    <div class="model-log" id="logConsole" style="display:block;max-height:480px;overflow-y:auto">로그가 여기에 표시됩니다.</div>
   </div>
   </div>
 </div>

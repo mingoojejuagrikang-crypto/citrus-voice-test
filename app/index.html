@@ -126,7 +126,7 @@
       <label>TTS 속도
         <select id="ttsRateSelect" onchange="window.changeTtsRate(this.value)">
           <option value="0.85">느리게 0.85</option>
-          <option value="0.95">보통 0.95</option>
+          <option value="0.95" selected>보통 0.95</option>
           <option value="1.05">빠르게 1.05</option>
         </select>
       </label>
@@ -263,11 +263,12 @@
   <div class="tab-pane" id="tab-logs">
   <div class="panel">
     <div class="schema-actions">
-      <button class="btn" onclick="window.downloadLogs('json')">JSON</button>
-      <button class="btn" onclick="window.downloadLogs('csv')">CSV</button>
-      <button class="btn" onclick="window.clearResults()">화면 초기화</button>
+      <button class="btn" onclick="window.downloadLogs('json')">JSON 다운</button>
+      <button class="btn" onclick="window.downloadLogs('csv')">CSV 다운</button>
+      <button class="btn" onclick="window.copyLogs()">로그 복사</button>
+      <button class="btn" onclick="window.clearLogs()">로그 지우기</button>
     </div>
-    <div class="model-log" id="logConsole" style="display:block;max-height:360px">로그가 여기에 표시됩니다.</div>
+    <div class="model-log" id="logConsole" style="display:block;max-height:480px;overflow-y:auto">로그가 여기에 표시됩니다.</div>
   </div>
   </div>
 </div>
@@ -607,13 +608,49 @@ function handleGemmaLogEntry(entry) {
 function renderLogConsole() {
   const box = document.getElementById('logConsole');
   if (!box) return;
-  const logs = feedbackLogs.slice(-80).reverse().map((log) => {
+  const logs = feedbackLogs.slice(-500).reverse();
+  if (!logs.length) {
+    box.innerHTML = '<div style="color:var(--txd);padding:8px">로그가 여기에 표시됩니다.</div>';
+    return;
+  }
+  const items = logs.map((log) => {
+    const time = log.ts ? log.ts.slice(11, 19) : '?';
     if (log.kind === 'recognition') {
-      return `[${log.ts}] raw="${log.rawText}" | interim="${log.interimText || '-'}" | final=${log.parse?.field ?? '-'} ${log.parse?.value ?? ''} | rule=${log.parse?.matchMethod || '-'} | llm=${log.gemma?.resolvedField || log.gemma?.outputText || '-'} | status=${log.status}`;
+      const parserPath = log.parse?.matchMethod || 'unmatched';
+      const field = log.parse?.field;
+      const value = log.parse?.value;
+      const score = log.parse?.matchScore != null ? `(${Number(log.parse.matchScore).toFixed(3)})` : '(-)';
+      const fieldVal = field ? `${field}=${value ?? '—'}` : '—';
+      const savedIcon = log.status === 'ok' ? '✅저장' : (log.status === 'warn' ? '⚠️대기' : '❌실패');
+      const llmTag = log.gemma ? ' [LLM]' : '';
+      const summary = `[${time}] ${parserPath} ${fieldVal} ${score} ${savedIcon}${llmTag}`;
+      const detail = {
+        rawText: log.rawText,
+        interimText: log.interimText || '',
+        normalizedText: log.normalizedText || '',
+        parserPath,
+        fieldCandidates: log.parse?.candidates || [],
+        field: log.parse?.field ?? null,
+        rawField: log.parse?.rawField ?? null,
+        value: log.parse?.value ?? null,
+        matchScore: log.parse?.matchScore ?? null,
+        matchMethod: log.parse?.matchMethod ?? null,
+        parseKind: log.parse?.parseKind ?? null,
+        replacesLogId: log.parse?.replacesLogId ?? null,
+        validation: log.validation ?? null,
+        pending: log.pending ?? null,
+        llm: log.gemma ? {input: log.gemma.inputText, output: log.gemma.outputText, latencyMs: log.gemma.latencyMs} : null,
+        saved: log.status,
+        ttsText: log.ttsText ?? null,
+        timing: log.timing,
+        vadMode: log.vadMode,
+      };
+      return `<details><summary style="cursor:pointer;font-family:monospace;font-size:12px;padding:3px 4px;white-space:pre;overflow:hidden;text-overflow:ellipsis">${escapeHtml(summary)}</summary><pre style="font-size:11px;padding:4px 8px;overflow-x:auto;margin:0;background:var(--sf2)">${escapeHtml(JSON.stringify(detail, null, 2))}</pre></details>`;
     }
-    return `[${log.ts}] ${log.kind} | ${JSON.stringify(log.detail || {})}`;
+    const summaryText = `[${time}] system: ${log.kind}`;
+    return `<details><summary style="cursor:pointer;font-family:monospace;font-size:12px;padding:3px 4px;color:var(--txd)">${escapeHtml(summaryText)}</summary><pre style="font-size:11px;padding:4px 8px;overflow-x:auto;margin:0;background:var(--sf2)">${escapeHtml(JSON.stringify(log.detail || {}, null, 2))}</pre></details>`;
   });
-  box.textContent = logs.length ? logs.join('\n') : '로그가 여기에 표시됩니다.';
+  box.innerHTML = items.join('');
 }
 function updateStats() {
   document.getElementById('statOk').textContent      = statOk;
@@ -1410,7 +1447,8 @@ function handleTranscript(text, meta) {
   }
 
   setLiveResult('FINAL', summary.display || text, message || summary.meta || '확정 결과', status === 'warn' ? 'pending' : 'final');
-  const log = recordRecognitionLog(text, parsed, {...meta, parseMs, status, message});
+  const validation = (parsed?.field && parsed?.value !== null && parsed?.value !== undefined) ? parser.validateValue(parsed.field, parsed.value) : null;
+  const log = recordRecognitionLog(text, parsed, {...meta, parseMs, status, message, validation});
   if ((parsed?.matchMethod === 'overwrite-last-number' || parsed?.matchMethod === 'explicit-correction') && parsed.replacesLogId) {
     markLogOverwritten(parsed.replacesLogId, log.id, parsed.value);
   }
@@ -1501,6 +1539,8 @@ function recordRecognitionLog(rawText, parsed, meta) {
     alternatives:    meta.alternatives || [],
     normalizedText:  parsed?.normalizedText || '',
     parse:           parsed ? {field: parsed.field, value: parsed.value, rawField: parsed.rawField, matchScore: parsed.matchScore, matchMethod: parsed.matchMethod, parseKind: parsed.parseKind || null, replacesLogId: parsed.replacesLogId || null, candidates: parsed.candidates || []} : null,
+    validation:      meta.validation || null,
+    pending:         parsed?.pending || null,
     status:          meta.status  || 'fail',
     message:         meta.message || meta.failure || '',
     timing:          {asrMs: meta.asrMs ?? null, parseMs: meta.parseMs ?? null},
@@ -1618,6 +1658,22 @@ window.downloadLogs = function(format) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   if (format === 'csv') { downloadBlob(`citrus-voice-feedback-${stamp}.csv`, logsToCsv(feedbackLogs), 'text/csv;charset=utf-8'); return; }
   downloadBlob(`citrus-voice-feedback-${stamp}.json`, JSON.stringify(feedbackLogs, null, 2), 'application/json;charset=utf-8');
+};
+window.copyLogs = function() {
+  if (!feedbackLogs.length) { alert('저장된 로그가 없습니다'); return; }
+  navigator.clipboard.writeText(JSON.stringify(feedbackLogs, null, 2)).then(() => {
+    setStatus('ok', `로그 ${feedbackLogs.length}건 클립보드 복사 완료`);
+  }).catch(() => {
+    alert('클립보드 복사 실패 — JSON 다운 버튼을 사용하세요');
+  });
+};
+window.clearLogs = function() {
+  if (!confirm(`로그 ${feedbackLogs.length}건을 삭제합니다. 계속할까요?`)) return;
+  feedbackLogs = [];
+  persistLogs();
+  renderLogConsole();
+  updateStats();
+  recordSystemLog('logs-cleared', {});
 };
 function logsToCsv(logs) {
   const rows = [['ts','kind','engine','model','rawText','interimText','field','value','score','method','status','message','llmField','llmValue','llmReason','asrMs','parseMs','audioMs','feedback','expectedText']];

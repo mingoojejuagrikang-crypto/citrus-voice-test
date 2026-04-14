@@ -96,7 +96,7 @@ function stripUnits(text) {
 
 function collapseNoiseTokens(text) {
   const tokens = splitTokens(text).filter((token, index, list) => {
-    const numeric = token.replace(/,/g, '');
+    const numeric = token.replace(/[,\s]/g, '');
     if (!NOISE_NUMBER_RE.test(numeric)) return true;
     const otherNumericExists = list.some((other, otherIndex) => otherIndex !== index && /[\d점.]/.test(other));
     return !otherNumericExists;
@@ -731,7 +731,7 @@ export class VoiceSurveyParser {
     }
 
     const numericOnly = parseFloatValue(normalizedText);
-    if (numericOnly.kind === 'value' && this.lastNumericTarget && now - this.lastNumericTarget.setAt <= OVERWRITE_WINDOW_MS && !NOISE_NUMBER_RE.test(String(normalizedText).replace(/[^\d]/g, ''))) {
+    if (numericOnly.kind === 'value' && this.lastNumericTarget && now - this.lastNumericTarget.setAt <= OVERWRITE_WINDOW_MS && !NOISE_NUMBER_RE.test(String(normalizedText).replace(/[,\s]/g, ''))) {
       const validation = this.validateValue(this.lastNumericTarget.field, numericOnly.value);
       if (validation.severity === 'ok' || validation.severity === 'warn') {
       return buildCandidate({
